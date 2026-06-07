@@ -1,0 +1,63 @@
+{
+  "generated_at": "2026-06-07T21:33:55Z",
+  "project": "PaperMind",
+  "root_claude_md": "CLAUDE.md",
+  "scan_coverage": {
+    "estimated_total_source_files": 15,
+    "scanned": 15,
+    "coverage_pct": 100,
+    "truncated": false
+  },
+  "modules": [
+    {
+      "name": "electron",
+      "path": "electron/",
+      "claude_md": "electron/CLAUDE.md",
+      "language": "TypeScript",
+      "entry": "electron/main.ts",
+      "interfaces": ["electron/ipc.ts", "electron/preload.ts"],
+      "data_model": ["electron/db/schema.ts", "electron/db/index.ts"],
+      "tests": null,
+      "gaps": ["no tests"]
+    },
+    {
+      "name": "stores",
+      "path": "src/stores/",
+      "claude_md": "src/stores/CLAUDE.md",
+      "language": "TypeScript",
+      "entry": ["src/stores/paper.ts", "src/stores/chat.ts"],
+      "interfaces": ["src/types/db.d.ts"],
+      "data_model": ["src/stores/paper.ts", "src/stores/chat.ts"],
+      "tests": null,
+      "gaps": ["no tests"]
+    },
+    {
+      "name": "views",
+      "path": "src/views/",
+      "claude_md": "src/views/CLAUDE.md",
+      "language": "Vue/TypeScript",
+      "entry": ["src/views/LibraryView.vue", "src/views/ReaderView.vue", "src/views/ChatView.vue", "src/views/SettingsView.vue"],
+      "interfaces": ["src/router/index.ts"],
+      "tests": null,
+      "gaps": ["no tests"]
+    },
+    {
+      "name": "components",
+      "path": "src/components/",
+      "claude_md": "src/components/CLAUDE.md",
+      "language": "Vue/TypeScript",
+      "entry": ["src/components/PdfViewer.vue", "src/components/ChatPanel.vue", "src/components/ParamPanel.vue"],
+      "interfaces": ["src/utils/pdfUtils.ts"],
+      "tests": null,
+      "gaps": ["no tests", "pdf worker uses CDN — needs local fallback for offline build"]
+    }
+  ],
+  "ignored": ["node_modules/**", ".git/**", "dist/**", "dist-electron/**", "release/**"],
+  "gap_list": [
+    "No test framework configured — recommend adding Vitest for stores and utils",
+    "src/styles/global.css not read (CSS variables / theming)",
+    "src/App.vue not read (sidebar layout, store init calls)",
+    "vite.config.ts not read (electron plugin config, build targets)"
+  ],
+  "next_run_priority": ["src/App.vue", "src/styles/global.css", "vite.config.ts", "tsconfig.json"]
+}
