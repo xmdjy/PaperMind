@@ -1,5 +1,5 @@
 import { ipcMain } from 'electron'
-import { kbApi, paperApi, chatApi, highlightApi, settingsApi, exportAll, clearAll } from './db'
+import { kbApi, paperApi, chatApi, highlightApi, settingsApi, indexApi, exportAll, clearAll } from './db'
 
 // Register all IPC handlers. Each channel maps to a db api call.
 // Renderer invokes via window.db.* (see preload.ts).
@@ -32,6 +32,10 @@ export function registerIpc() {
     // data management
     'data:export': () => exportAll(),
     'data:clear': () => clearAll(),
+    // paper indexes (PageIndex RAG)
+    'index:list': () => indexApi.list(),
+    'index:get': (_e, paperId) => indexApi.get(paperId),
+    'index:set': (_e, paperId, indexJson, pagesJson) => indexApi.set(paperId, indexJson, pagesJson),
   }
 
   for (const [channel, fn] of Object.entries(handlers)) {

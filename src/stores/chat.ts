@@ -1,5 +1,6 @@
 import { defineStore } from 'pinia'
 import { ref } from 'vue'
+import { extractPages, buildPageIndex, retrieve } from '../utils/pageIndex'
 
 export interface Message {
   id: string
@@ -36,13 +37,56 @@ export const useChatStore = defineStore('chat', () => {
   const conversations = ref<Conversation[]>([])
   const config = ref<LLMConfig>({ ...defaultConfig })
   const loaded = ref(false)
+  const indexingPapers = ref<Set<string>>(new Set())
+  const indexedPapers = ref<Set<string>>(new Set())
 
   async function init() {
     if (loaded.value) return
     conversations.value = await window.db.chat.listConversations()
     const savedConfig = await window.db.settings.get('llm_config')
     if (savedConfig) config.value = { ...defaultConfig, ...savedConfig }
+    const ids = await window.db.index.list()
+    indexedPapers.value = new Set(ids)
     loaded.value = true
+  }
+
+  async function callLLM(messages: { role: string; content: string }[]): Promise<string> {
+    const cfg = config.value
+    if (cfg.provider === 'ollama') {
+      const res = await fetch(`${cfg.baseUrl}/api/chat`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ model: cfg.model, messages, stream: false }),
+      })
+      const data = await res.json()
+      return data.message?.content ?? ''
+    }
+    const headers: Record<string, string> = { 'Content-Type': 'application/json' }
+    if (cfg.provider === 'openai') headers['Authorization'] = `Bearer ${cfg.apiKey}`
+    if (cfg.provider === 'anthropic') { headers['x-api-key'] = cfg.apiKey; headers['anthropic-version'] = '2023-06-01' }
+    const res = await fetch(`${cfg.baseUrl}/chat/completions`, {
+      method: 'POST',
+      headers,
+      body: JSON.stringify({ model: cfg.model, messages, temperature: cfg.temperature, max_tokens: cfg.maxTokens }),
+    })
+    const data = await res.json()
+    return data.choices?.[0]?.message?.content ?? ''
+  }
+
+  async function indexPaper(paperId: string): Promise<void> {
+    if (indexingPapers.value.has(paperId)) return
+    indexingPapers.value.add(paperId)
+    try {
+      const base64 = await window.db.paper.readFile(paperId)
+      if (!base64) throw new Error('paper file not found')
+      const pages = await extractPages(base64)
+      const llmFn = (prompt: string) => callLLM([{ role: 'user', content: prompt }])
+      const tree = await buildPageIndex(pages, llmFn)
+      await window.db.index.set(paperId, JSON.stringify(tree), JSON.stringify(pages))
+      indexedPapers.value = new Set([...indexedPapers.value, paperId])
+    } finally {
+      indexingPapers.value.delete(paperId)
+    }
   }
 
   async function newConversation(title: string, paperIds: string[]): Promise<Conversation> {
@@ -83,40 +127,37 @@ export const useChatStore = defineStore('chat', () => {
 
     await addMessage(convId, 'user', userMessage)
 
+    // RAG: retrieve context from indexed papers when no manual context provided
+    let ragSources: string[] = []
+    if (!context && conv.paperIds.length > 0) {
+      const parts: string[] = []
+      const llmFn = (prompt: string) => callLLM([{ role: 'user', content: prompt }])
+      for (const paperId of conv.paperIds) {
+        const stored = await window.db.index.get(paperId)
+        if (!stored) continue
+        const tree = JSON.parse(stored.indexJson)
+        const pages = JSON.parse(stored.pagesJson)
+        const { context: ctx, sources } = await retrieve(tree, pages, userMessage, llmFn)
+        parts.push(ctx)
+        ragSources.push(...sources)
+      }
+      if (parts.length > 0) context = parts.join('\n\n---\n\n')
+    }
+
     const cfg = config.value
     const messages = [
       { role: 'system', content: cfg.systemPrompt + (context ? `\n\n参考内容：\n${context}` : '') },
       ...conv.messages.slice(-20).map(m => ({ role: m.role, content: m.content })),
     ]
 
-    let reply = ''
-    if (cfg.provider === 'ollama') {
-      const res = await fetch(`${cfg.baseUrl}/api/chat`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ model: cfg.model, messages, stream: false }),
-      })
-      const data = await res.json()
-      reply = data.message?.content ?? ''
-    } else {
-      const headers: Record<string, string> = { 'Content-Type': 'application/json' }
-      if (cfg.provider === 'openai') headers['Authorization'] = `Bearer ${cfg.apiKey}`
-      if (cfg.provider === 'anthropic') { headers['x-api-key'] = cfg.apiKey; headers['anthropic-version'] = '2023-06-01' }
-      const res = await fetch(`${cfg.baseUrl}/chat/completions`, {
-        method: 'POST',
-        headers,
-        body: JSON.stringify({ model: cfg.model, messages, temperature: cfg.temperature, max_tokens: cfg.maxTokens }),
-      })
-      const data = await res.json()
-      reply = data.choices?.[0]?.message?.content ?? ''
-    }
-
-    await addMessage(convId, 'assistant', reply)
+    const reply = await callLLM(messages)
+    await addMessage(convId, 'assistant', reply, ragSources.length ? ragSources : undefined)
     return reply
   }
 
   return {
-    conversations, config, loaded, init,
-    newConversation, addMessage, removeConversation, syncPaperIds, updateConfig, sendMessage,
+    conversations, config, loaded, indexingPapers, indexedPapers, init,
+    newConversation, addMessage, removeConversation, syncPaperIds, updateConfig,
+    sendMessage, indexPaper,
   }
 })

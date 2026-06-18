@@ -33,6 +33,11 @@ export interface DbApi {
     export: () => Promise<any>
     clear: () => Promise<void>
   }
+  index: {
+    list: () => Promise<string[]>
+    get: (paperId: string) => Promise<{ indexJson: string; pagesJson: string } | null>
+    set: (paperId: string, indexJson: string, pagesJson: string) => Promise<void>
+  }
 }
 
 declare global {

@@ -35,6 +35,11 @@ const db = {
     export: () => ipcRenderer.invoke('data:export'),
     clear: () => ipcRenderer.invoke('data:clear'),
   },
+  index: {
+    list: () => ipcRenderer.invoke('index:list'),
+    get: (paperId: string) => ipcRenderer.invoke('index:get', paperId),
+    set: (paperId: string, indexJson: string, pagesJson: string) => ipcRenderer.invoke('index:set', paperId, indexJson, pagesJson),
+  },
 }
 
 contextBridge.exposeInMainWorld('db', db)

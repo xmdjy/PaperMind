@@ -22,6 +22,15 @@
             <span class="pli-title">{{ p.title || p.fileName }}</span>
             <span class="pli-meta">{{ p.authors?.[0] || '未知' }} · {{ p.year || '—' }}</span>
           </div>
+          <div class="pli-index" @click.stop>
+            <el-tooltip v-if="chatStore.indexedPapers.has(p.id)" content="已建立索引" placement="right">
+              <el-icon class="index-done"><CircleCheck /></el-icon>
+            </el-tooltip>
+            <el-icon v-else-if="chatStore.indexingPapers.has(p.id)" class="index-loading is-loading"><Loading /></el-icon>
+            <el-tooltip v-else content="建立 PageIndex 索引以启用智能检索" placement="right">
+              <el-button size="small" text @click="doIndex(p.id)"><el-icon><Download /></el-icon></el-button>
+            </el-tooltip>
+          </div>
         </div>
         <el-empty v-if="kbPapers.length === 0" description="该知识库暂无论文" :image-size="60" />
       </el-scrollbar>
@@ -70,8 +79,8 @@
 
 <script setup lang="ts">
 import { ref, computed } from 'vue'
-import { ElMessageBox } from 'element-plus'
-import { ChatLineRound, Close, Files, Plus, Setting } from '@element-plus/icons-vue'
+import { ElMessageBox, ElMessage } from 'element-plus'
+import { ChatLineRound, Close, Files, Plus, Setting, CircleCheck, Loading, Download } from '@element-plus/icons-vue'
 import ChatPanel from '../components/ChatPanel.vue'
 import ParamPanel from '../components/ParamPanel.vue'
 import { usePaperStore } from '../stores/paper'
@@ -89,6 +98,14 @@ const chatPanelRef = ref<InstanceType<typeof ChatPanel>>()
 const kbPapers = computed(() => paperStore.getPapersByKb(activeKbId.value).value)
 const allConversations = computed(() => chatStore.conversations)
 const activeConv = computed(() => chatStore.conversations.find(c => c.id === activeConvId.value) ?? null)
+
+async function doIndex(paperId: string) {
+  try {
+    await chatStore.indexPaper(paperId)
+  } catch (e: any) {
+    ElMessage.error(`建立索引失败：${e.message}`)
+  }
+}
 
 function toggleSelect(id: string) {
   const idx = selectedPaperIds.value.indexOf(id)
@@ -131,9 +148,12 @@ async function delConv(id: string) {
 }
 .paper-list-item:hover { background: var(--bg-hover); }
 .paper-list-item.selected { background: var(--accent-dim); }
-.pli-info { display: flex; flex-direction: column; gap: 2px; overflow: hidden; }
+.pli-info { display: flex; flex-direction: column; gap: 2px; overflow: hidden; flex: 1; }
 .pli-title { font-size: 13px; color: var(--text-primary); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .pli-meta { font-size: 11px; color: var(--text-muted); }
+.pli-index { flex-shrink: 0; display: flex; align-items: center; }
+.index-done { color: #67c23a; font-size: 14px; }
+.index-loading { color: var(--text-muted); font-size: 14px; }
 
 .left-footer { border-top: 1px solid var(--border); padding: 12px 8px; }
 .conv-list-label { font-size: 11px; color: var(--text-muted); padding: 0 8px 8px; text-transform: uppercase; letter-spacing: 0.5px; }

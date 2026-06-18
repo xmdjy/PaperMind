@@ -163,6 +163,19 @@ export const settingsApi = {
   },
 }
 
+// ---------- Paper Indexes ----------
+export const indexApi = {
+  list: () => (db.prepare('SELECT paper_id FROM paper_indexes').all() as any[]).map(r => r.paper_id as string),
+  get: (paperId: string) => {
+    const row = db.prepare('SELECT index_json, pages_json FROM paper_indexes WHERE paper_id = ?').get(paperId) as any
+    return row ? { indexJson: row.index_json, pagesJson: row.pages_json } : null
+  },
+  set: (paperId: string, indexJson: string, pagesJson: string) => {
+    db.prepare('INSERT INTO paper_indexes (paper_id, index_json, pages_json, created_at) VALUES (?, ?, ?, ?) ON CONFLICT(paper_id) DO UPDATE SET index_json=excluded.index_json, pages_json=excluded.pages_json, created_at=excluded.created_at')
+      .run(paperId, indexJson, pagesJson, Date.now())
+  },
+}
+
 export function exportAll() {
   return {
     knowledgeBases: kbApi.list(),

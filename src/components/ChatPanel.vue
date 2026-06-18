@@ -15,7 +15,8 @@
         <div class="msg-body">
           <div class="msg-content" v-html="renderContent(msg.content)" />
           <div v-if="msg.sources?.length" class="msg-sources">
-            <el-icon><Link /></el-icon> 引用 {{ msg.sources.length }} 处
+            <el-icon><Link /></el-icon>
+            <span v-for="(s, i) in msg.sources" :key="i" class="source-chip">{{ s }}</span>
           </div>
         </div>
       </div>
@@ -138,7 +139,8 @@ async function send() {
 }
 .message.user .msg-content { background: var(--accent-dim); }
 .msg-content :deep(code) { background: var(--bg-elevated); padding: 1px 5px; border-radius: 4px; font-size: 13px; }
-.msg-sources { font-size: 11px; color: var(--text-muted); margin-top: 4px; display: flex; align-items: center; gap: 4px; }
+.msg-sources { font-size: 11px; color: var(--text-muted); margin-top: 4px; display: flex; align-items: center; gap: 4px; flex-wrap: wrap; }
+.source-chip { background: var(--bg-elevated); padding: 1px 6px; border-radius: 4px; color: var(--text-secondary); }
 
 .typing { padding: 12px 14px; display: flex; gap: 4px; }
 .typing span { width: 6px; height: 6px; border-radius: 50%; background: var(--text-muted); animation: bounce 1.2s infinite; }
