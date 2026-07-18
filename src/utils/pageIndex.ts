@@ -136,20 +136,50 @@ export async function buildPageIndex(pages: string[], llm: LLMFn): Promise<Index
   return { title, nodeId: 'root', startPage: 0, endPage: pages.length - 1, summary, nodes: leaves }
 }
 
-export async function retrieve(
-  root: IndexNode, pages: string[], query: string, llm: LLMFn
+/** 对所有叶节点打分，返回 Top-2 合并上下文。JSON 解析失败时降级为第一节点。 */
+export async function scoreAndSelect(
+  root: IndexNode,
+  pages: string[],
+  query: string,
+  llm: LLMFn,
 ): Promise<{ context: string; sources: string[] }> {
-  let node = root
-  while (node.nodes.length > 0) {
-    const options = node.nodes.map((n, i) => `[${i + 1}] ${n.title}: ${n.summary}`).join('\n')
-    const prompt = `Query: ${query}\n\nSections:\n${options}\n\nWhich section number is most relevant? Reply with just the number.`
-    try {
-      const raw = await llm(prompt)
-      const idx = parseInt(raw.trim()) - 1
-      if (idx >= 0 && idx < node.nodes.length) { node = node.nodes[idx]; continue }
-    } catch { /* fall through */ }
-    node = node.nodes[0]
+  // 收集叶节点（无子节点的节点）
+  const leaves = root.nodes.length > 0 ? root.nodes : [root]
+
+  // 单节点无需调用 LLM
+  if (leaves.length === 1) {
+    const leaf = leaves[0]
+    return {
+      context: pages.slice(leaf.startPage, leaf.endPage + 1).join('\n\n'),
+      sources: [`Pages ${leaf.startPage + 1}–${leaf.endPage + 1}: ${leaf.title}`],
+    }
   }
-  const context = pages.slice(node.startPage, node.endPage + 1).join('\n\n')
-  return { context, sources: [`Pages ${node.startPage + 1}–${node.endPage + 1}: ${node.title}`] }
+
+  const options = leaves.map((n, i) => `[${i}] ${n.title}: ${n.summary}`).join('\n')
+  const prompt = `Query: ${query}\n\nSections:\n${options}\n\nRate each section's relevance to the query (0-10).\nReturn JSON only: [{"id":0,"score":8},{"id":1,"score":2},...]`
+
+  let selected: IndexNode[]
+  try {
+    const raw = (await llm(prompt)).replace(/```json\n?|```/g, '').trim()
+    const scores = JSON.parse(raw) as Array<{ id: number; score: number }>
+    const sorted = [...scores].sort((a, b) => b.score - a.score)
+
+    const picked: IndexNode[] = [leaves[sorted[0].id]]
+    if (sorted[1] && sorted[1].score >= 4) picked.push(leaves[sorted[1].id])
+
+    // 按文档顺序排列（startPage 升序）
+    selected = picked.sort((a, b) => a.startPage - b.startPage)
+  } catch {
+    selected = [leaves[0]]
+  }
+
+  const context = selected
+    .map(n => pages.slice(n.startPage, n.endPage + 1).join('\n\n'))
+    .join('\n\n---\n\n')
+
+  const sources = selected.map(
+    n => `Pages ${n.startPage + 1}–${n.endPage + 1}: ${n.title}`,
+  )
+
+  return { context, sources }
 }

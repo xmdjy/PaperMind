@@ -1,6 +1,6 @@
 import { defineStore } from 'pinia'
 import { ref } from 'vue'
-import { extractPages, buildPageIndex, retrieve } from '../utils/pageIndex'
+import { extractPages, buildPageIndex, scoreAndSelect } from '../utils/pageIndex'
 
 export interface Message {
   id: string
@@ -137,7 +137,7 @@ export const useChatStore = defineStore('chat', () => {
         if (!stored) continue
         const tree = JSON.parse(stored.indexJson)
         const pages = JSON.parse(stored.pagesJson)
-        const { context: ctx, sources } = await retrieve(tree, pages, userMessage, llmFn)
+        const { context: ctx, sources } = await scoreAndSelect(tree, pages, userMessage, llmFn)
         parts.push(ctx)
         ragSources.push(...sources)
       }
