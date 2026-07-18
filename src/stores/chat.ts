@@ -73,6 +73,27 @@ export const useChatStore = defineStore('chat', () => {
     return data.choices?.[0]?.message?.content ?? ''
   }
 
+  /** 利用对话历史将追问改写为独立检索查询。失败时返回原始 query。 */
+  async function rewriteQuery(
+    query: string,
+    history: Message[],
+    llmFn: (prompt: string) => Promise<string>,
+  ): Promise<string> {
+    const historyText = history.map(m => `${m.role}: ${m.content}`).join('\n')
+    const prompt = `Based on the following conversation, rewrite the user's latest question as a self-contained retrieval query. Resolve pronouns, expand abbreviations, preserve technical terms. Return ONLY the rewritten query, no explanation.
+
+Conversation:
+${historyText}
+
+Latest question: ${query}`
+    try {
+      const result = await llmFn(prompt)
+      return result.trim() || query
+    } catch {
+      return query
+    }
+  }
+
   async function indexPaper(paperId: string): Promise<void> {
     if (indexingPapers.value.has(paperId)) return
     indexingPapers.value.add(paperId)
@@ -127,17 +148,26 @@ export const useChatStore = defineStore('chat', () => {
 
     await addMessage(convId, 'user', userMessage)
 
-    // RAG: retrieve context from indexed papers when no manual context provided
+    // RAG: 3-call 管线 — 查询改写（有历史时）→ 评分多选 → 注入上下文
     let ragSources: string[] = []
     if (!context && conv.paperIds.length > 0) {
       const parts: string[] = []
       const llmFn = (prompt: string) => callLLM([{ role: 'user', content: prompt }])
+
+      // Call 1（条件）：查询改写 — 取当前消息之前的最近3条历史
+      // conv.messages 此时已包含刚加入的 userMessage（最后一条），故取 slice(-4, -1)
+      const historyBeforeCurrent = conv.messages.slice(-4, -1)
+      const retrievalQuery = historyBeforeCurrent.length >= 2
+        ? await rewriteQuery(userMessage, historyBeforeCurrent, llmFn)
+        : userMessage
+
       for (const paperId of conv.paperIds) {
         const stored = await window.db.index.get(paperId)
         if (!stored) continue
         const tree = JSON.parse(stored.indexJson)
         const pages = JSON.parse(stored.pagesJson)
-        const { context: ctx, sources } = await scoreAndSelect(tree, pages, userMessage, llmFn)
+        // Call 2：评分多选
+        const { context: ctx, sources } = await scoreAndSelect(tree, pages, retrievalQuery, llmFn)
         parts.push(ctx)
         ragSources.push(...sources)
       }
