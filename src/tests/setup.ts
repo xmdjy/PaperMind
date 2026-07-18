@@ -31,6 +31,11 @@ const mockDb = {
     get: vi.fn().mockResolvedValue(null),
     set: vi.fn().mockResolvedValue(undefined),
   },
+  index: {
+    list: vi.fn().mockResolvedValue([]),
+    get:  vi.fn().mockResolvedValue(null),
+    set:  vi.fn().mockResolvedValue(undefined),
+  },
   data: {
     export: vi.fn().mockResolvedValue({}),
     clear: vi.fn().mockResolvedValue(undefined),

@@ -1,5 +1,12 @@
 import { describe, it, expect, beforeEach, vi } from 'vitest'
 import { setActivePinia, createPinia } from 'pinia'
+
+// pageIndex.ts (imported by chat.ts) pulls in pdfjs-dist which needs DOMMatrix — mock it in Node
+vi.mock('pdfjs-dist', () => ({
+  default: {},
+  GlobalWorkerOptions: { workerSrc: '' },
+}))
+
 import { useChatStore } from '../stores/chat'
 
 describe('useChatStore', () => {
