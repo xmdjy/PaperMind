@@ -180,6 +180,7 @@ Latest question: ${query}`
       ...conv.messages.slice(-20).map(m => ({ role: m.role, content: m.content })),
     ]
 
+    // Call 3: generate answer
     const reply = await callLLM(messages)
     await addMessage(convId, 'assistant', reply, ragSources.length ? ragSources : undefined)
     return reply

@@ -89,8 +89,8 @@ describe('useChatStore', () => {
     expect(conv.messages[1].role).toBe('assistant')
   })
 
-  it('sendMessage skips query rewriting on first message (2 LLM calls total)', async () => {
-    // 首条消息，无对话历史，应跳过查询改写：共2次 fetch（scoreAndSelect + 回答）
+  it('sendMessage skips query rewriting on first message (1 LLM call: answer only)', async () => {
+    // 首条消息，无对话历史，应跳过查询改写：单节点 root 无子节点，scoreAndSelect 不调用 LLM，仅回答 = 1次
     let callCount = 0
     global.fetch = vi.fn().mockImplementation(() => {
       callCount++
