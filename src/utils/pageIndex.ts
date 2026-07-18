@@ -28,7 +28,7 @@ export function detectSectionBoundaries(pages: string[]): number[] {
 }
 
 /** 将不足 minPages 页的节并入前一节（若无前节则并入后节）。 */
-function mergeSmallSections(
+export function mergeSmallSections(
   ranges: Array<{ start: number; end: number }>,
   minPages = 2,
 ): Array<{ start: number; end: number }> {

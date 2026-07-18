@@ -27,7 +27,7 @@ describe('base64ToUrl', () => {
 })
 
 // pageIndex 依赖 pdfjs-dist，在同一文件内 mock 已生效，直接动态导入
-const { detectSectionBoundaries } = await import('../utils/pageIndex')
+const { detectSectionBoundaries, mergeSmallSections } = await import('../utils/pageIndex')
 
 describe('detectSectionBoundaries', () => {
   it('detects English numbered headings', () => {
@@ -77,5 +77,41 @@ describe('detectSectionBoundaries', () => {
       'even more plain text with no recognizable heading format',
     ]
     expect(detectSectionBoundaries(pages)).toEqual([])
+  })
+})
+
+describe('mergeSmallSections', () => {
+  it('returns single section unchanged (no merge due to result.length > 1 guard)', () => {
+    const ranges = [{ start: 0, end: 5 }]
+    const result = mergeSmallSections(ranges, 2)
+    expect(result).toEqual([{ start: 0, end: 5 }])
+  })
+
+  it('merges last section smaller than minPages into previous section', () => {
+    const ranges = [
+      { start: 0, end: 2 },  // 3 pages
+      { start: 3, end: 3 },  // 1 page (< 2)
+    ]
+    const result = mergeSmallSections(ranges, 2)
+    expect(result).toEqual([{ start: 0, end: 3 }])
+  })
+
+  it('merges first section smaller than minPages into next section', () => {
+    const ranges = [
+      { start: 0, end: 0 },  // 1 page (< 2)
+      { start: 1, end: 3 },  // 3 pages
+    ]
+    const result = mergeSmallSections(ranges, 2)
+    expect(result).toEqual([{ start: 0, end: 3 }])
+  })
+
+  it('does not merge sections at or above minPages threshold', () => {
+    const ranges = [
+      { start: 0, end: 1 },  // 2 pages (>= 2)
+      { start: 2, end: 4 },  // 3 pages (>= 2)
+      { start: 5, end: 6 },  // 2 pages (>= 2)
+    ]
+    const result = mergeSmallSections(ranges, 2)
+    expect(result).toEqual(ranges)
   })
 })
