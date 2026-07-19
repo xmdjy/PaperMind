@@ -1,6 +1,7 @@
 # PaperMind
 
 **变更记录**
+- 2026-07-18T00:00:00: 检索管线升级（语义分块 + 查询改写 + 评分多选）
 - 2026-06-07T21:33:55: 初始化 AI 上下文文档
 
 ---
@@ -88,8 +89,9 @@ npm run test:ui   # 浏览器 UI
 | 文件 | 覆盖内容 |
 |------|---------|
 | `src/tests/paper.store.test.ts` | usePaperStore：init、CRUD、idempotent、fileData 剥离 |
-| `src/tests/chat.store.test.ts` | useChatStore：init、对话 CRUD、config、sendMessage |
-| `src/tests/pdfUtils.test.ts` | base64ToUrl：URL 格式、Blob type |
+| `src/tests/chat.store.test.ts` | useChatStore：init、对话 CRUD、config、sendMessage（含 RAG 管线调用次数校验） |
+| `src/tests/pdfUtils.test.ts` | base64ToUrl：URL 格式、Blob type；detectSectionBoundaries：英/中标题识别、降级；mergeSmallSections：边界合并逻辑 |
+| `src/tests/pageIndex.test.ts` | scoreAndSelect：Top-2 选取、阈值、JSON 降级、单节点短路；buildPageIndex：预边界页面不丢失 |
 
 **Mock 策略**：`src/tests/setup.ts` 在全局 `window.db` 上注入 `vi.fn()` mock，stores 完全与 Electron IPC 解耦，无需启动 Electron 即可测试业务逻辑。
 
@@ -109,5 +111,7 @@ npm run test:ui   # 浏览器 UI
 
 - 修改数据模型时，需同步更新：`electron/db/schema.ts`、`electron/db/index.ts`（序列化/反序列化）、`src/stores/paper.ts` 或 `src/stores/chat.ts` 中的接口定义、`src/types/db.d.ts`
 - 新增 IPC 通道：在 `electron/ipc.ts` 注册 handler，在 `electron/preload.ts` 暴露方法，在 `src/types/db.d.ts` 补充类型
-- LLM 调用逻辑全部在 `src/stores/chat.ts` 的 `sendMessage` 方法中，修改 provider 适配在此处进行
+- LLM 调用逻辑全部在 `src/stores/chat.ts` 的 `sendMessage` 方法中；RAG 管线为 3-call 流程：查询改写（`rewriteQuery`，有历史时）→ 评分多选（`scoreAndSelect`）→ 生成回答
+- 检索/索引逻辑在 `src/utils/pageIndex.ts`：`buildPageIndex` 构建语义分块索引，`scoreAndSelect` 替换原有 `retrieve`（已删除）；修改检索策略只需改这一个文件
+- `detectSectionBoundaries` 和 `mergeSmallSections` 均已导出，可在测试中直接使用
 - PDF worker 使用本地文件 `/pdf.worker.min.mjs`（`public/` 目录），由 `vite.config.ts` 启动时从 `node_modules/pdfjs-dist/build/` 复制，离线可用

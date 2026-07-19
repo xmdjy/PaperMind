@@ -3,6 +3,7 @@
 # src/stores/ — 状态管理模块
 
 **变更记录**
+- 2026-07-18T00:00:00: 更新 sendMessage RAG 管线文档（3-call 流程）
 - 2026-06-07T21:33:55: 初始化文档
 
 ## 模块职责
@@ -47,8 +48,20 @@ Pinia 全局状态管理，封装所有与主进程的 IPC 通信，以及 LLM A
 
 ## LLM 调用逻辑
 
-`sendMessage` 在 `chat.ts` 中实现，直接从渲染进程发出 fetch 请求：
+`sendMessage` 在 `chat.ts` 中实现，直接从渲染进程发出 fetch 请求。
 
+**RAG 管线（3-call 流程，有索引时触发）：**
+
+1. **Call 1 — 查询改写**（条件：对话有 ≥2 条前置消息）  
+   `rewriteQuery(userMessage, historyBeforeCurrent, llmFn)` — 将追问展开为独立检索查询；失败时静默回退原始问题
+2. **Call 2 — 评分多选**  
+   `scoreAndSelect(tree, pages, retrievalQuery, llmFn)` — 对所有节点打分（0-10），取 Top-2（第二节点需 ≥4 分），按文档顺序合并
+3. **Call 3 — 生成回答**  
+   注入合并后的上下文，调用 `callLLM`
+
+无索引时退化为单次回答调用（无 RAG）。
+
+**LLM Provider 适配：**
 - **ollama**：`POST {baseUrl}/api/chat`，non-stream
 - **openai / anthropic**：`POST {baseUrl}/chat/completions`，OpenAI 兼容格式
   - openai 使用 `Authorization: Bearer {apiKey}`
