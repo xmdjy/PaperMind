@@ -21,7 +21,7 @@
       </div>
 
       <!-- Resizer -->
-      <div class="resizer" @mousedown="startResize" />
+      <div class="resizer" role="separator" aria-orientation="vertical" aria-label="调整面板宽度" @mousedown="startResize" />
 
       <!-- Right: Chat -->
       <div class="split-right" :style="{ width: `${100 - splitRatio}%` }">
@@ -113,17 +113,46 @@ onBeforeUnmount(() => {
 .reader-view { display: flex; flex-direction: column; height: 100%; overflow: hidden; }
 
 .reader-topbar {
-  display: flex; align-items: center; gap: 16px;
-  padding: 12px 20px; border-bottom: 1px solid var(--border); flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  padding: 12px 20px;
+  border-bottom: 1px solid var(--border);
+  flex-shrink: 0;
+  background: color-mix(in srgb, var(--bg-surface) 70%, transparent);
 }
-.reader-title { flex: 1; font-size: 15px; font-weight: 600; color: var(--text-primary); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.reader-title {
+  flex: 1;
+  min-width: 0;
+  font-size: 15px;
+  font-weight: 600;
+  color: var(--text-primary);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
 
 .reader-split { flex: 1; display: flex; overflow: hidden; }
 .split-left { overflow: hidden; height: 100%; }
-.split-right { overflow: hidden; height: 100%; display: flex; flex-direction: column; }
+.split-right { overflow: hidden; height: 100%; display: flex; flex-direction: column; min-width: 0; }
 
-.resizer { width: 4px; background: var(--border); cursor: col-resize; flex-shrink: 0; transition: background 0.15s; }
-.resizer:hover { background: var(--accent); }
+.resizer {
+  width: 4px;
+  background: var(--border);
+  cursor: col-resize;
+  flex-shrink: 0;
+  transition: background 0.15s var(--ease-out), box-shadow 0.15s var(--ease-out);
+}
+.resizer:hover {
+  background: var(--accent);
+  box-shadow: 0 0 0 1px var(--accent-dim);
+}
 
-.chat-header { display: flex; gap: 8px; padding: 10px 12px; border-bottom: 1px solid var(--border); background: var(--bg-surface); }
+.chat-header {
+  display: flex;
+  gap: 8px;
+  padding: 10px 12px;
+  border-bottom: 1px solid var(--border);
+  background: color-mix(in srgb, var(--bg-surface) 92%, transparent);
+}
 </style>

@@ -178,38 +178,81 @@ onBeforeUnmount(() => {
 .pdf-viewer { display: flex; flex-direction: column; height: 100%; position: relative; background: #1a1a22; }
 
 .pdf-toolbar {
-  display: flex; align-items: center; justify-content: space-between;
-  padding: 8px 16px; background: var(--bg-surface);
-  border-bottom: 1px solid var(--border); flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 8px 16px;
+  background: color-mix(in srgb, var(--bg-surface) 94%, transparent);
+  border-bottom: 1px solid var(--border);
+  flex-shrink: 0;
 }
 .tb-group { display: flex; align-items: center; gap: 4px; }
-.page-indicator, .zoom-indicator { font-size: 12px; color: var(--text-secondary); min-width: 50px; text-align: center; }
+.page-indicator, .zoom-indicator {
+  font-size: 12px;
+  color: var(--text-secondary);
+  min-width: 50px;
+  text-align: center;
+  font-variant-numeric: tabular-nums;
+}
 
-.pdf-scroll { flex: 1; overflow-y: auto; padding: 20px; display: flex; flex-direction: column; align-items: center; gap: 16px; }
+.pdf-scroll {
+  flex: 1;
+  overflow-y: auto;
+  padding: 20px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 16px;
+}
 
 :deep(.pdf-page) {
-  position: relative; background: white;
-  box-shadow: 0 4px 24px rgba(0,0,0,0.4); border-radius: 2px;
+  position: relative;
+  background: white;
+  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.45);
+  border-radius: 3px;
 }
 :deep(.text-layer) {
-  position: absolute; inset: 0; overflow: hidden; line-height: 1;
-  opacity: 0.25; --scale-factor: 1;
+  position: absolute;
+  inset: 0;
+  overflow: hidden;
+  line-height: 1;
+  opacity: 0.25;
+  --scale-factor: 1;
 }
-:deep(.text-layer span) { color: transparent; position: absolute; white-space: pre; cursor: text; transform-origin: 0 0; }
-:deep(.text-layer ::selection) { background: rgba(124,106,247,0.4); }
+:deep(.text-layer span) {
+  color: transparent;
+  position: absolute;
+  white-space: pre;
+  cursor: text;
+  transform-origin: 0 0;
+}
+:deep(.text-layer ::selection) { background: rgba(61, 184, 160, 0.4); }
 :deep(.pdf-highlight) { background: var(--gold); opacity: 0.4; border-radius: 2px; }
 
 .selection-popup {
-  position: absolute; z-index: 100;
-  display: flex; gap: 2px; padding: 4px;
-  background: var(--bg-elevated); border: 1px solid var(--border-light);
-  border-radius: 8px; box-shadow: 0 8px 24px rgba(0,0,0,0.5);
+  position: absolute;
+  z-index: 100;
+  display: flex;
+  gap: 2px;
+  padding: 4px;
+  background: var(--bg-elevated);
+  border: 1px solid var(--border-light);
+  border-radius: 8px;
+  box-shadow: var(--shadow-card);
 }
 .popup-btn {
-  display: flex; align-items: center; gap: 4px;
-  padding: 6px 10px; background: transparent; border: none;
-  color: var(--text-secondary); font-size: 12px; cursor: pointer;
-  border-radius: 5px; font-family: inherit;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 6px 10px;
+  background: transparent;
+  border: none;
+  color: var(--text-secondary);
+  font-size: 12px;
+  cursor: pointer;
+  border-radius: 5px;
+  font-family: inherit;
+  transition: background 0.15s var(--ease-out), color 0.15s var(--ease-out);
 }
 .popup-btn:hover { background: var(--accent-dim); color: var(--accent); }
 </style>

@@ -45,7 +45,7 @@ describe('usePaperStore', () => {
   it('addKnowledgeBase appends to list', async () => {
     const store = usePaperStore()
     await store.init()
-    await store.addKnowledgeBase('ML Papers', 'Machine learning', '#7c6af7')
+    await store.addKnowledgeBase('ML Papers', 'Machine learning', '#3db8a0')
     expect(store.knowledgeBases).toHaveLength(2)
     expect(store.knowledgeBases[1].name).toBe('ML Papers')
   })

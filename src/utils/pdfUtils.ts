@@ -7,7 +7,14 @@ export async function parsePdfMeta(file: File): Promise<{
   title: string; authors: string[]; abstract: string; year: number; fileData: string
 }> {
   const arrayBuffer = await file.arrayBuffer()
-  const base64 = btoa(String.fromCharCode(...new Uint8Array(arrayBuffer)))
+  // Chunked base64 — avoids "Maximum call stack size exceeded" for large PDFs
+  const bytes = new Uint8Array(arrayBuffer)
+  let binary = ''
+  const CHUNK = 8192
+  for (let i = 0; i < bytes.length; i += CHUNK) {
+    binary += String.fromCharCode(...bytes.subarray(i, i + CHUNK))
+  }
+  const base64 = btoa(binary)
   const pdf = await pdfjsLib.getDocument({ data: arrayBuffer }).promise
   const meta = await pdf.getMetadata().catch(() => ({ info: {} }))
   const info = (meta as any).info ?? {}

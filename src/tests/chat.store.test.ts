@@ -14,22 +14,34 @@ describe('useChatStore', () => {
     setActivePinia(createPinia())
     ;(globalThis as any).mockDb.chat.listConversations.mockResolvedValue([])
     ;(globalThis as any).mockDb.settings.get.mockResolvedValue(null)
+    ;(globalThis as any).mockDb.index.list.mockResolvedValue([])
   })
 
-  it('init loads conversations and default config', async () => {
+  it('init loads conversations and default profile', async () => {
     const store = useChatStore()
     await store.init()
     expect(store.conversations).toHaveLength(0)
-    expect(store.config.provider).toBe('openai')
+    expect(store.profiles).toHaveLength(1)
+    expect(store.chatProfile.provider).toBe('openai')
     expect(store.loaded).toBe(true)
   })
 
-  it('init restores saved config', async () => {
-    ;(globalThis as any).mockDb.settings.get.mockResolvedValue({ provider: 'ollama', model: 'llama3' })
+  it('init restores saved profiles list', async () => {
+    const savedProfiles = [
+      { id: 'p1', name: 'Ollama', provider: 'ollama', model: 'llama3',
+        apiKey: '', baseUrl: 'http://localhost:11434', temperature: 0.5,
+        maxTokens: 1024, topK: 0, systemPrompt: '' },
+    ]
+    ;(globalThis as any).mockDb.settings.get.mockImplementation((key: string) => {
+      if (key === 'llm_profiles') return Promise.resolve(savedProfiles)
+      if (key === 'llm_profile_chat') return Promise.resolve('p1')
+      if (key === 'llm_profile_index') return Promise.resolve('p1')
+      return Promise.resolve(null)
+    })
     const store = useChatStore()
     await store.init()
-    expect(store.config.provider).toBe('ollama')
-    expect(store.config.model).toBe('llama3')
+    expect(store.chatProfile.provider).toBe('ollama')
+    expect(store.chatProfile.model).toBe('llama3')
   })
 
   it('newConversation creates and prepends to list', async () => {
@@ -60,13 +72,17 @@ describe('useChatStore', () => {
     expect(store.conversations).toHaveLength(0)
   })
 
-  it('updateConfig persists to settings', async () => {
+  it('updateProfile persists to settings', async () => {
     const store = useChatStore()
     await store.init()
-    await store.updateConfig({ temperature: 1.5, model: 'gpt-4' })
-    expect(store.config.temperature).toBe(1.5)
-    expect(store.config.model).toBe('gpt-4')
-    expect((globalThis as any).mockDb.settings.set).toHaveBeenCalledWith('llm_config', expect.objectContaining({ temperature: 1.5 }))
+    const id = store.chatProfile.id
+    await store.updateProfile(id, { temperature: 1.5, model: 'gpt-4' })
+    expect(store.chatProfile.temperature).toBe(1.5)
+    expect(store.chatProfile.model).toBe('gpt-4')
+    expect((globalThis as any).mockDb.settings.set).toHaveBeenCalledWith(
+      'llm_profiles',
+      expect.arrayContaining([expect.objectContaining({ temperature: 1.5 })]),
+    )
   })
 
   it('sendMessage throws for unknown conversation', async () => {
@@ -81,7 +97,7 @@ describe('useChatStore', () => {
     }) as any
     const store = useChatStore()
     await store.init()
-    await store.updateConfig({ apiKey: 'sk-test' })
+    await store.updateProfile(store.chatProfile.id, { apiKey: 'sk-test' })
     const conv = await store.newConversation('Chat', [])
     const reply = await store.sendMessage(conv.id, 'Question')
     expect(reply).toBe('Answer')
@@ -109,13 +125,12 @@ describe('useChatStore', () => {
 
     const store = useChatStore()
     await store.init()
-    await store.updateConfig({ apiKey: 'sk-test' })
+    await store.updateProfile(store.chatProfile.id, { apiKey: 'sk-test' })
     const conv = await store.newConversation('test', ['paper-1'])
 
     await store.sendMessage(conv.id, 'What is this paper about?')
 
     // 单节点（root 无子节点）scoreAndSelect 不调用 LLM，加上回答 = 1次
-    // 若有多节点才是2次。此处 root 无子节点，共1次回答调用
     expect(callCount).toBe(1)
   })
 
@@ -145,7 +160,7 @@ describe('useChatStore', () => {
 
     const store = useChatStore()
     await store.init()
-    await store.updateConfig({ apiKey: 'sk-test' })
+    await store.updateProfile(store.chatProfile.id, { apiKey: 'sk-test' })
     const conv = await store.newConversation('test', ['paper-1'])
 
     // 第一条消息（建立历史，不触发改写）

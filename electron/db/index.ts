@@ -22,7 +22,7 @@ export function initDb() {
   const count = (db.prepare('SELECT COUNT(*) AS n FROM knowledge_bases').get() as { n: number }).n
   if (count === 0) {
     db.prepare('INSERT INTO knowledge_bases (id, name, description, color, created_at) VALUES (?, ?, ?, ?, ?)')
-      .run('default', '默认知识库', '未分类论文', '#409EFF', Date.now())
+      .run('default', '默认知识库', '未分类论文', '#3db8a0', Date.now())
   }
 }
 
@@ -190,5 +190,5 @@ export function clearAll() {
   for (const p of papers) if (existsSync(p.file_path)) unlinkSync(p.file_path)
   db.exec('DELETE FROM messages; DELETE FROM conversations; DELETE FROM highlights; DELETE FROM papers; DELETE FROM knowledge_bases; DELETE FROM settings;')
   db.prepare('INSERT INTO knowledge_bases (id, name, description, color, created_at) VALUES (?, ?, ?, ?, ?)')
-    .run('default', '默认知识库', '未分类论文', '#409EFF', Date.now())
+    .run('default', '默认知识库', '未分类论文', '#3db8a0', Date.now())
 }

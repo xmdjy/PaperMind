@@ -3,6 +3,7 @@
 # src/components/ — 公共组件模块
 
 **变更记录**
+- 2026-07-19T14:49:32: ChatPanel / ParamPanel / PdfViewer 视觉与 a11y 微调
 - 2026-06-07T21:33:55: 初始化文档
 
 ## 模块职责
