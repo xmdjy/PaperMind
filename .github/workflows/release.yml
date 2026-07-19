@@ -1,0 +1,129 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v[0-9]*'
+  workflow_dispatch:
+
+env:
+  NODE_VERSION: '20'
+
+jobs:
+  build:
+    name: Build · ${{ matrix.name }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          # Linux x64 - AppImage
+          - name: linux-x64
+            os: ubuntu-latest
+            eb_args: --linux
+            arch_flag: x64
+
+          # macOS Intel x64 - dmg
+          - name: darwin-x64
+            os: macos-13
+            eb_args: --mac --x64
+            arch_flag: x64
+
+          # macOS Apple Silicon arm64 - dmg
+          - name: darwin-arm64
+            os: macos-latest
+            eb_args: --mac --arm64
+            arch_flag: arm64
+
+          # Windows x64 - NSIS installer
+          - name: win32-x64
+            os: windows-latest
+            eb_args: --win --x64
+            arch_flag: x64
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+
+      # Linux 需要 fuse（AppImage 运行时依赖）及原生构建工具
+      - name: Install Linux build dependencies
+        if: runner.os == 'Linux'
+        run: sudo apt-get install -y libfuse2 python3 make g++
+
+      - name: Install dependencies
+        run: npm ci
+
+      # 禁用 macOS 代码签名（未配置证书时跳过，产出未签名包）
+      - name: Build
+        env:
+          CSC_IDENTITY_AUTO_DISCOVERY: 'false'
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: npx vue-tsc --noEmit && npx vite build && npx electron-builder ${{ matrix.eb_args }}
+
+      # 将 electron-builder 产物重命名为统一的 <name>-<version>-<platform>.* 格式
+      - name: Rename artifacts
+        shell: bash
+        run: |
+          VERSION=$(node -p "require('./package.json').version")
+          APP=$(node -p "require('./package.json').name")
+          TAG="${GITHUB_REF_NAME:-v${VERSION}}"
+          OUTDIR="release"
+
+          case "${{ matrix.name }}" in
+            linux-*)
+              SRC=$(ls "$OUTDIR"/*.AppImage | head -1)
+              DEST="${APP}-${TAG}-${{ matrix.name }}.AppImage"
+              ;;
+            darwin-*)
+              SRC=$(ls "$OUTDIR"/*.dmg | head -1)
+              DEST="${APP}-${TAG}-${{ matrix.name }}.dmg"
+              ;;
+            win32-*)
+              SRC=$(ls "$OUTDIR"/*.exe | head -1)
+              DEST="${app}-${TAG}-${{ matrix.name }}.exe"
+              ;;
+          esac
+
+          mv "$SRC" "$OUTDIR/$DEST"
+          echo "ASSET=$OUTDIR/$DEST" >> "$GITHUB_ENV"
+          echo "DEST=$DEST" >> "$GITHUB_ENV"
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: pkg-${{ matrix.name }}
+          path: ${{ env.ASSET }}
+          if-no-files-found: error
+          retention-days: 1
+
+  release:
+    name: Create Release
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
+        with:
+          pattern: pkg-*
+          merge-multiple: true
+          path: artifacts
+
+      - name: Generate SHA-256 checksums
+        working-directory: artifacts
+        run: sha256sum * | tee checksums-sha256.txt
+
+      - name: Publish GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          generate_release_notes: true
+          fail_on_unmatched_files: true
+          files: artifacts/*
