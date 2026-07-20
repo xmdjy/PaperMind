@@ -9,7 +9,7 @@ import { copyFileSync, mkdirSync } from 'fs'
 try {
   mkdirSync(resolve(__dirname, 'public'), { recursive: true })
   copyFileSync(
-    resolve(__dirname, 'node_modules/pdfjs-dist/build/pdf.worker.min.mjs'),
+    resolve(__dirname, 'node_modules/pdfjs-dist/legacy/build/pdf.worker.min.mjs'),
     resolve(__dirname, 'public/pdf.worker.min.mjs'),
   )
 } catch { /* ignore if already exists */ }

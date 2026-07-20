@@ -3,7 +3,7 @@ import { scoreAndSelect, buildPageIndex } from '../utils/pageIndex'
 import type { IndexNode } from '../utils/pageIndex'
 
 // pdfjs-dist 在 pageIndex.ts 顶层导入，测试中需要 mock
-vi.mock('pdfjs-dist', () => ({
+vi.mock('pdfjs-dist/legacy/build/pdf.mjs', () => ({
   default: {},
   GlobalWorkerOptions: { workerSrc: '' },
   getDocument: vi.fn(),

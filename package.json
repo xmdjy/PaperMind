@@ -3,6 +3,10 @@
   "version": "0.1.0",
   "description": "",
   "main": "dist-electron/main.js",
+  "engines": {
+    "node": "^20.19.0 || ^22.13.0 || >=24.0.0",
+    "npm": ">=10.0.0"
+  },
   "scripts": {
     "dev": "vite",
     "build": "vue-tsc --noEmit && vite build && electron-builder",
@@ -17,14 +21,14 @@
   "devDependencies": {
     "@electron/rebuild": "^3.7.2",
     "@types/better-sqlite3": "^7.6.13",
-    "@vitejs/plugin-vue": "^5.0.0",
+    "@vitejs/plugin-vue": "^5.2.4",
     "@vitest/ui": "^4.1.8",
     "@vue/test-utils": "^2.4.11",
     "electron": "^31.0.0",
     "electron-builder": "^24.0.0",
     "jsdom": "^29.1.1",
     "typescript": "^5.4.0",
-    "vite": "^5.3.0",
+    "vite": "^6.4.3",
     "vite-plugin-electron": "^0.28.0",
     "vite-plugin-electron-renderer": "^0.14.0",
     "vitest": "^4.1.8",
@@ -36,8 +40,8 @@
     "element-plus": "^2.14.1",
     "pdfjs-dist": "^6.0.227",
     "pinia": "^3.0.4",
-    "vue": "^3.4.0",
-    "vue-router": "^5.1.0"
+    "vue": "^3.5.35",
+    "vue-router": "^4.6.4"
   },
   "build": {
     "appId": "com.papermind.app",
