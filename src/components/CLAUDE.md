@@ -21,7 +21,7 @@ Emits: `select-text(text: string)`
 - 一次性渲染全部页面到独立 canvas，支持缩放（0.5x–3x）和分页跳转
 - 每页叠加透明文本层（`TextLayer`），支持原生文本选择
 - 选中文本后弹出浮层，提供「发送到对话」和「高亮」两个操作
-- worker 使用 CDN：`cdnjs.cloudflare.com/ajax/libs/pdf.js/{version}/pdf.worker.min.js`
+- 使用 `pdfjs-dist/legacy/build/pdf.mjs` 兼容 Electron 31；worker 由 `vite.config.ts` 复制到本地并通过相对路径加载，兼容开发服务器与打包后的 `file://`
 
 注意：缩放时重新渲染全部页面（调用 `renderPdf()`），大文档时可能有性能开销。
 

@@ -1,7 +1,7 @@
-import * as pdfjsLib from 'pdfjs-dist'
+import * as pdfjsLib from 'pdfjs-dist/legacy/build/pdf.mjs'
 
-// Use local worker (copied to public/ by vite.config.ts) — offline-safe
-pdfjsLib.GlobalWorkerOptions.workerSrc = '/pdf.worker.min.mjs'
+// Relative URL works with both the Vite dev server and packaged Electron file:// pages.
+pdfjsLib.GlobalWorkerOptions.workerSrc = './pdf.worker.min.mjs'
 
 export async function parsePdfMeta(file: File): Promise<{
   title: string; authors: string[]; abstract: string; year: number; fileData: string

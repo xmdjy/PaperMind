@@ -1,6 +1,6 @@
-import * as pdfjsLib from 'pdfjs-dist'
+import * as pdfjsLib from 'pdfjs-dist/legacy/build/pdf.mjs'
 
-pdfjsLib.GlobalWorkerOptions.workerSrc = '/pdf.worker.min.mjs'
+pdfjsLib.GlobalWorkerOptions.workerSrc = './pdf.worker.min.mjs'
 
 // ── 语义分块：节标题识别模式（英文 + 中文）───────────────────────────────────
 const SECTION_PATTERNS: RegExp[] = [

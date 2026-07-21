@@ -12,9 +12,10 @@ PDF 工具函数与 RAG 检索索引模块。
 
 **Worker 配置**
 ```ts
-pdfjsLib.GlobalWorkerOptions.workerSrc = '/pdf.worker.min.mjs'
-// 文件由 vite.config.ts 启动时从 node_modules/pdfjs-dist/build/ 复制到 public/
-// 离线可用，不依赖 CDN
+import * as pdfjsLib from 'pdfjs-dist/legacy/build/pdf.mjs'
+pdfjsLib.GlobalWorkerOptions.workerSrc = './pdf.worker.min.mjs'
+// 文件由 vite.config.ts 启动时从 node_modules/pdfjs-dist/legacy/build/ 复制到 public/
+// 相对路径兼容 Vite 开发服务器与 Electron file://，离线可用，不依赖 CDN
 ```
 
 #### `parsePdfMeta(file: File)`

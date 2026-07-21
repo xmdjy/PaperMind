@@ -1,7 +1,7 @@
 import { describe, it, expect, vi } from 'vitest'
 
 // Mock pdfjs-dist before importing pdfUtils — avoids DOMMatrix error in Node/jsdom
-vi.mock('pdfjs-dist', () => ({
+vi.mock('pdfjs-dist/legacy/build/pdf.mjs', () => ({
   default: {},
   GlobalWorkerOptions: { workerSrc: '' },
 }))

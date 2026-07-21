@@ -35,13 +35,13 @@
 
 <script setup lang="ts">
 import { ref, onMounted, onBeforeUnmount, computed } from 'vue'
-import * as pdfjsLib from 'pdfjs-dist'
+import * as pdfjsLib from 'pdfjs-dist/legacy/build/pdf.mjs'
 import { ArrowUp, ArrowDown, ZoomIn, ZoomOut, ChatLineSquare, EditPen } from '@element-plus/icons-vue'
 
 const props = defineProps<{ src: string }>()
 const emit = defineEmits<{ (e: 'select-text', text: string): void }>()
 
-pdfjsLib.GlobalWorkerOptions.workerSrc = '/pdf.worker.min.mjs'
+pdfjsLib.GlobalWorkerOptions.workerSrc = './pdf.worker.min.mjs'
 
 const containerRef = ref<HTMLElement>()
 const scrollRef = ref<HTMLElement>()

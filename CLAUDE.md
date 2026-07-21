@@ -115,4 +115,4 @@ npm run test:ui   # 浏览器 UI
 - LLM 调用逻辑全部在 `src/stores/chat.ts` 的 `sendMessage` 方法中；RAG 管线为 3-call 流程：查询改写（`rewriteQuery`，有历史时）→ 评分多选（`scoreAndSelect`）→ 生成回答
 - 检索/索引逻辑在 `src/utils/pageIndex.ts`：`buildPageIndex` 构建语义分块索引，`scoreAndSelect` 替换原有 `retrieve`（已删除）；修改检索策略只需改这一个文件
 - `detectSectionBoundaries` 和 `mergeSmallSections` 均已导出，可在测试中直接使用
-- PDF worker 使用本地文件 `/pdf.worker.min.mjs`（`public/` 目录），由 `vite.config.ts` 启动时从 `node_modules/pdfjs-dist/build/` 复制，离线可用
+- PDF.js 使用兼容 Electron 31 的 legacy 构建；worker 使用相对路径 `./pdf.worker.min.mjs`（`public/` 目录），由 `vite.config.ts` 启动时从 `node_modules/pdfjs-dist/legacy/build/` 复制，兼容开发服务器与打包后的 `file://`，且离线可用
