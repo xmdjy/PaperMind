@@ -52,7 +52,7 @@
         name="chat-message"
         autocomplete="off"
         placeholder="输入问题，Enter 发送，Shift+Enter 换行…"
-        @keydown.enter.exact.prevent="send"
+        @keydown.enter.exact="handleEnter"
       />
       <el-button
         type="primary"
@@ -101,6 +101,14 @@ async function scrollToBottom() {
 }
 
 watch(() => props.conversation?.messages.length, scrollToBottom)
+
+function handleEnter(event: KeyboardEvent) {
+  // Enter confirms the current candidate while an IME is composing. It must
+  // not submit the message until composition has finished.
+  if (event.isComposing || event.keyCode === 229) return
+  event.preventDefault()
+  send()
+}
 
 async function send() {
   if (!input.value.trim() || !props.conversation) {
