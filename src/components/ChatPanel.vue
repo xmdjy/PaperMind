@@ -298,6 +298,13 @@ async function send() {
   white-space: pre;
 }
 
+.msg-content :deep(.katex-display) {
+  margin: 0.85em 0;
+  padding: 0.2em 0;
+  overflow-x: auto;
+  overflow-y: hidden;
+}
+
 .msg-content :deep(table) {
   display: block;
   width: max-content;

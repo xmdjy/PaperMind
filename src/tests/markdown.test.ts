@@ -46,4 +46,31 @@ const answer = 42
 
     expect(html).not.toContain('<a ')
   })
+
+  it('renders dollar-delimited inline and display LaTeX', () => {
+    const html = renderMarkdown('Inline $E = mc^2$.\n\n$$\n\\int_0^1 x^2 \\, dx\n$$')
+
+    expect(html).toContain('class="katex"')
+    expect(html).toContain('class="katex-display"')
+    expect(html).toContain('<math')
+  })
+
+  it('normalizes bracket-delimited display LaTeX to dollar delimiters', () => {
+    const html = renderMarkdown('\\[\\sum_{i=1}^{n} i\\]')
+
+    expect(html).toContain('class="katex-display"')
+    expect(html).not.toContain('\\[')
+    expect(html).not.toContain('\\]')
+  })
+
+  it('normalizes parenthesis-delimited inline LaTeX to dollar delimiters', () => {
+    const html = renderMarkdown('维度为 \\(d\\)，索引为 \\(k = 0, 1, \\dots, \\frac{d}{2}\\)。')
+    const container = document.createElement('div')
+    container.innerHTML = html
+
+    expect(container.querySelectorAll('.katex')).toHaveLength(2)
+    expect(container.querySelector('.katex-html')?.textContent).not.toContain('\\')
+    expect(html).not.toContain('\\(')
+    expect(html).not.toContain('\\)')
+  })
 })
