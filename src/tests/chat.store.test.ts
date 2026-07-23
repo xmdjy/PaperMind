@@ -1,5 +1,6 @@
 import { describe, it, expect, beforeEach, vi } from 'vitest'
 import { setActivePinia, createPinia } from 'pinia'
+import { isProxy } from 'vue'
 
 // pageIndex.ts (imported by chat.ts) pulls in pdfjs-dist which needs DOMMatrix — mock it in Node
 vi.mock('pdfjs-dist/legacy/build/pdf.mjs', () => ({
@@ -83,6 +84,11 @@ describe('useChatStore', () => {
       'llm_profiles',
       expect.arrayContaining([expect.objectContaining({ temperature: 1.5 })]),
     )
+
+    const profileWrite = (globalThis as any).mockDb.settings.set.mock.calls
+      .find(([key]: [string]) => key === 'llm_profiles')
+    expect(isProxy(profileWrite[1])).toBe(false)
+    expect(profileWrite[1].every((profile: unknown) => !isProxy(profile))).toBe(true)
   })
 
   it('sendMessage throws for unknown conversation', async () => {

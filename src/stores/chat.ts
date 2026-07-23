@@ -72,6 +72,13 @@ export const useChatStore = defineStore('chat', () => {
     profiles.value.find(p => p.id === indexProfileId.value) ?? profiles.value[0],
   )
 
+  // Electron IPC uses structured clone and cannot serialize Vue reactive proxies.
+  // Copy the array and every profile into plain objects before crossing the bridge.
+  async function persistProfiles() {
+    const plainProfiles = profiles.value.map(profile => ({ ...profile }))
+    await window.db.settings.set('llm_profiles', plainProfiles)
+  }
+
   async function init() {
     if (loaded.value) return
     conversations.value = await window.db.chat.listConversations()
@@ -92,7 +99,7 @@ export const useChatStore = defineStore('chat', () => {
         }]
       }
       // 无论是迁移还是全新安装，都将当前 profiles 写入磁盘，确保下次启动可恢复
-      await window.db.settings.set('llm_profiles', profiles.value)
+      await persistProfiles()
     }
 
     const savedChatId = await window.db.settings.get('llm_profile_chat')
@@ -119,7 +126,7 @@ export const useChatStore = defineStore('chat', () => {
   async function addProfile(profile: Omit<LLMProfile, 'id'>): Promise<LLMProfile> {
     const newProfile: LLMProfile = { ...profile, id: crypto.randomUUID() }
     profiles.value.push(newProfile)
-    await window.db.settings.set('llm_profiles', profiles.value)
+    await persistProfiles()
     return newProfile
   }
 
@@ -127,7 +134,7 @@ export const useChatStore = defineStore('chat', () => {
     const idx = profiles.value.findIndex(p => p.id === id)
     if (idx === -1) return
     profiles.value[idx] = { ...profiles.value[idx], ...patch }
-    await window.db.settings.set('llm_profiles', profiles.value)
+    await persistProfiles()
   }
 
   async function removeProfile(id: string) {
@@ -136,7 +143,7 @@ export const useChatStore = defineStore('chat', () => {
     // 若删除的是当前选中项，自动切换到第一个
     if (chatProfileId.value === id) await setChatProfileId(profiles.value[0].id)
     if (indexProfileId.value === id) await setIndexProfileId(profiles.value[0].id)
-    await window.db.settings.set('llm_profiles', profiles.value)
+    await persistProfiles()
   }
 
   async function setChatProfileId(id: string) {
