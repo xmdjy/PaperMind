@@ -67,6 +67,27 @@
         </div>
       </section>
 
+      <!-- ── 论文摘要模型 ── -->
+      <section class="settings-card">
+        <h3>论文摘要模型</h3>
+        <p class="card-desc">
+          对话中输入 <code>/abstract</code> 时，使用
+          <code>{{ chatStore.ABSTRACT_MODEL }}</code> 为当前所选论文生成摘要。
+          Token 仅保存在本地。
+        </p>
+        <div class="abstract-token-row">
+          <el-input
+            v-model="abstractTokenLocal"
+            type="password"
+            show-password
+            autocomplete="off"
+            spellcheck="false"
+            placeholder="hf_…"
+          />
+          <el-button type="primary" @click="saveAbstractToken">保存 Token</el-button>
+        </div>
+      </section>
+
       <!-- ── 数据管理 ── -->
       <section class="settings-card">
         <h3>数据管理</h3>
@@ -175,11 +196,12 @@ import { useChatStore, PROMPT_TEMPLATES, type LLMProfile } from '../stores/chat'
 import { storeToRefs } from 'pinia'
 
 const chatStore = useChatStore()
-const { profiles, chatProfileId, indexProfileId } = storeToRefs(chatStore)
+const { profiles, chatProfileId, indexProfileId, abstractToken } = storeToRefs(chatStore)
 
 // 本地绑定，避免直接修改 store ref（select @change 时再写入）
 const chatProfileIdLocal = ref(chatProfileId.value)
 const indexProfileIdLocal = ref(indexProfileId.value)
+const abstractTokenLocal = ref(abstractToken.value)
 
 // ── Dialog state ──
 const dialogVisible = ref(false)
@@ -229,6 +251,11 @@ async function doRemove(id: string) {
   chatProfileIdLocal.value = chatProfileId.value
   indexProfileIdLocal.value = indexProfileId.value
   ElMessage.success('已删除')
+}
+
+async function saveAbstractToken() {
+  await chatStore.setAbstractToken(abstractTokenLocal.value)
+  ElMessage.success('Hugging Face Token 已保存')
 }
 
 // ── Data management ──
@@ -343,6 +370,13 @@ async function clearData() {
 .setting-row label { width: 80px; font-size: 13px; color: var(--text-secondary); flex-shrink: 0; }
 
 .action-row { display: flex; gap: 8px; flex-wrap: wrap; }
+.abstract-token-row { display: flex; gap: 8px; }
+.card-desc code {
+  color: var(--accent);
+  background: var(--bg-elevated);
+  padding: 1px 5px;
+  border-radius: 4px;
+}
 
 /* About */
 .about { display: flex; align-items: center; gap: 14px; }

@@ -11,6 +11,7 @@
 - **自定义参数** — 实时调整 provider / model / temperature / max_tokens / 系统提示词
 - **提示词模板** — 内置精读、通俗解释、要点提取、批判分析、翻译等模板
 - **多 LLM 支持** — OpenAI / Anthropic / Ollama（本地模型），一键切换
+- **论文摘要命令** — 在对话中输入 `/abstract`，使用 `Bashaarat1/t5-small-arxiv-summarizer` 总结所选论文
 
 ## 数据存储
 

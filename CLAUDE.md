@@ -116,3 +116,6 @@ npm run test:ui   # 浏览器 UI
 - 检索/索引逻辑在 `src/utils/pageIndex.ts`：`buildPageIndex` 构建语义分块索引，`scoreAndSelect` 替换原有 `retrieve`（已删除）；修改检索策略只需改这一个文件
 - `detectSectionBoundaries` 和 `mergeSmallSections` 均已导出，可在测试中直接使用
 - PDF.js 使用兼容 Electron 31 的 legacy 构建；worker 使用相对路径 `./pdf.worker.min.mjs`（`public/` 目录），由 `vite.config.ts` 启动时从 `node_modules/pdfjs-dist/legacy/build/` 复制，兼容开发服务器与打包后的 `file://`，且离线可用
+
+## 最终检查
+在交付代码修改的结果之前，请自行进行类型检查，你必须运行的命令是`npm test`和`npm run typecheck`，只有全部通过后才能交付

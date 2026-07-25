@@ -13,7 +13,9 @@
         v-for="msg in conversation?.messages" :key="msg.id"
         class="message" :class="msg.role"
       >
-        <div class="msg-avatar" aria-hidden="true">{{ msg.role === 'user' ? '我' : 'AI' }}</div>
+        <div class="msg-avatar" aria-hidden="true">
+          <img :src="msg.role === 'user' ? userAvatar : agentAvatar" alt="" />
+        </div>
         <div class="msg-body">
           <div class="msg-content" v-html="renderMarkdown(msg.content)" />
           <div v-if="msg.sources?.length" class="msg-sources">
@@ -24,7 +26,9 @@
       </div>
 
       <div v-if="loading" class="message assistant">
-        <div class="msg-avatar" aria-hidden="true">AI</div>
+        <div class="msg-avatar" aria-hidden="true">
+          <img :src="agentAvatar" alt="" />
+        </div>
         <div class="msg-body">
           <div class="typing" aria-label="正在生成回答…">
             <span /><span /><span />
@@ -44,6 +48,15 @@
     </div>
 
     <div class="chat-input-area">
+      <button
+        v-if="showAbstractCommand"
+        type="button"
+        class="command-option"
+        @mousedown.prevent="input = '/abstract'"
+      >
+        <span class="command-name">/abstract</span>
+        <span class="command-desc">使用论文摘要模型总结当前所选论文</span>
+      </button>
       <el-input
         v-model="input"
         type="textarea"
@@ -51,7 +64,7 @@
         resize="none"
         name="chat-message"
         autocomplete="off"
-        placeholder="输入问题，Enter 发送，Shift+Enter 换行…"
+        placeholder="输入问题或 / 查看命令，Enter 发送…"
         @keydown.enter.exact="handleEnter"
       />
       <el-button
@@ -69,11 +82,13 @@
 </template>
 
 <script setup lang="ts">
-import { ref, nextTick, watch } from 'vue'
+import { ref, computed, nextTick, watch } from 'vue'
 import { ElMessage } from 'element-plus'
 import { Link, Document, Close, Promotion, ChatDotRound } from '@element-plus/icons-vue'
 import { useChatStore, type Conversation } from '../stores/chat'
 import { renderMarkdown } from '../utils/markdown'
+import userAvatar from '../../assets/user.png'
+import agentAvatar from '../../assets/agent.png'
 
 const props = defineProps<{ conversation: Conversation | null }>()
 const chatStore = useChatStore()
@@ -82,6 +97,10 @@ const input = ref('')
 const loading = ref(false)
 const messagesRef = ref<HTMLElement>()
 const pendingContext = ref<string[]>([])
+const showAbstractCommand = computed(() => {
+  const value = input.value.trim().toLowerCase()
+  return value.startsWith('/') && '/abstract'.startsWith(value) && value !== '/abstract'
+})
 
 function addContext(text: string) {
   pendingContext.value.push(text)
@@ -193,22 +212,15 @@ async function send() {
   height: 30px;
   border-radius: 8px;
   flex-shrink: 0;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  font-size: 12px;
-  font-weight: 600;
+  overflow: hidden;
+  box-shadow: var(--shadow-sm);
 }
 
-.message.user .msg-avatar {
-  background: linear-gradient(145deg, var(--accent-hover), var(--accent));
-  color: #0c0e11;
-}
-
-.message.assistant .msg-avatar {
-  background: var(--gold-dim);
-  color: var(--gold);
-  border: 1px solid color-mix(in srgb, var(--gold) 22%, transparent);
+.msg-avatar img {
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
 }
 
 .msg-body {
@@ -423,6 +435,7 @@ async function send() {
 .chip-close:hover { color: var(--danger); }
 
 .chat-input-area {
+  position: relative;
   display: flex;
   gap: 8px;
   padding: 14px 16px;
@@ -430,6 +443,31 @@ async function send() {
   align-items: flex-end;
   background: color-mix(in srgb, var(--bg-surface) 88%, transparent);
 }
+
+.command-option {
+  position: absolute;
+  left: 16px;
+  right: 72px;
+  bottom: calc(100% + 6px);
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 10px 12px;
+  border: 1px solid var(--border-light);
+  border-radius: 8px;
+  background: var(--bg-elevated);
+  color: var(--text-primary);
+  box-shadow: var(--shadow-md);
+  cursor: pointer;
+  text-align: left;
+  font-family: inherit;
+}
+.command-option:hover {
+  border-color: var(--accent);
+  background: var(--accent-dim);
+}
+.command-name { color: var(--accent); font-weight: 600; }
+.command-desc { color: var(--text-muted); font-size: 12px; }
 
 .send-btn {
   height: 56px;

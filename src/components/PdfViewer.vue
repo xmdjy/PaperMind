@@ -52,9 +52,101 @@ const scale = ref(1.3)
 const selectedText = ref('')
 
 let pdfDoc: any = null
+let selectedRange: Range | null = null
 const selectionPopup = ref({ visible: false, x: 0, y: 0 })
+interface HighlightSegment {
+  page: number
+  start: number
+  end: number
+}
+const highlightSegments: HighlightSegment[] = []
 
 const popupStyle = computed(() => ({ left: `${selectionPopup.value.x}px`, top: `${selectionPopup.value.y}px` }))
+
+function getTextNodes(root: HTMLElement): Text[] {
+  const nodes: Text[] = []
+  const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT)
+  let node = walker.nextNode()
+  while (node) {
+    if (node.textContent) nodes.push(node as Text)
+    node = walker.nextNode()
+  }
+  return nodes
+}
+
+function subtractExisting(segment: HighlightSegment): HighlightSegment[] {
+  const existing = highlightSegments
+    .filter(item => item.page === segment.page)
+    .sort((a, b) => a.start - b.start)
+
+  let uncovered = [segment]
+  for (const cover of existing) {
+    uncovered = uncovered.flatMap(part => {
+      if (cover.end <= part.start || cover.start >= part.end) return [part]
+      const pieces: HighlightSegment[] = []
+      if (cover.start > part.start) pieces.push({ ...part, end: cover.start })
+      if (cover.end < part.end) pieces.push({ ...part, start: cover.end })
+      return pieces
+    })
+  }
+  return uncovered
+}
+
+function caretRect(node: Text, offset: number): DOMRect {
+  const range = document.createRange()
+  range.setStart(node, offset)
+  range.collapse(true)
+  const rect = range.getBoundingClientRect()
+  range.detach()
+  return rect
+}
+
+function drawSegment(pageDiv: HTMLElement, segment: HighlightSegment) {
+  const nodes = getTextNodes(pageDiv.querySelector<HTMLElement>('.text-layer')!)
+  let offset = 0
+
+  for (const node of nodes) {
+    const length = node.data.length
+    const nodeStart = offset
+    const nodeEnd = offset + length
+    const start = Math.max(segment.start, nodeStart)
+    const end = Math.min(segment.end, nodeEnd)
+    if (end > start) {
+      const localStart = start - nodeStart
+      const localEnd = end - nodeStart
+      const startRect = caretRect(node, localStart)
+      const endRect = caretRect(node, localEnd)
+
+      const textRange = document.createRange()
+      textRange.setStart(node, localStart)
+      textRange.setEnd(node, localEnd)
+      const textRect = textRange.getBoundingClientRect()
+      textRange.detach()
+
+      const left = Math.min(startRect.left, endRect.left)
+      const right = Math.max(startRect.left, endRect.left)
+      if (right > left && textRect.height > 0) {
+        const pageRect = pageDiv.getBoundingClientRect()
+        const verticalInset = Math.min(1.5, textRect.height * 0.09)
+        const overlay = document.createElement('div')
+        overlay.className = 'pdf-highlight-overlay'
+        overlay.style.left = `${left - pageRect.left}px`
+        overlay.style.top = `${textRect.top - pageRect.top + verticalInset}px`
+        overlay.style.width = `${right - left}px`
+        overlay.style.height = `${textRect.height - verticalInset * 2}px`
+        pageDiv.appendChild(overlay)
+      }
+    }
+    offset = nodeEnd
+  }
+}
+
+function restorePageHighlights(pageDiv: HTMLElement, page: number) {
+  const segments = highlightSegments
+    .filter(segment => segment.page === page)
+    .sort((a, b) => b.start - a.start)
+  for (const segment of segments) drawSegment(pageDiv, segment)
+}
 
 async function renderPdf() {
   if (!pagesRef.value) return
@@ -92,6 +184,7 @@ async function renderPage(num: number) {
   // Text layer for selection
   const textLayerDiv = document.createElement('div')
   textLayerDiv.className = 'text-layer'
+  textLayerDiv.style.setProperty('--scale-factor', String(viewport.scale))
   pageDiv.appendChild(textLayerDiv)
 
   pagesRef.value!.appendChild(pageDiv)
@@ -109,6 +202,8 @@ async function renderPage(num: number) {
     viewport,
   })
   await textLayer.render()
+
+  restorePageHighlights(pageDiv, num)
 }
 
 function onScroll() {
@@ -140,7 +235,8 @@ function onMouseUp() {
   const text = sel?.toString().trim() ?? ''
   if (text.length > 0 && sel && sel.rangeCount > 0) {
     selectedText.value = text
-    const rect = sel.getRangeAt(0).getBoundingClientRect()
+    selectedRange = sel.getRangeAt(0).cloneRange()
+    const rect = selectedRange.getBoundingClientRect()
     const containerRect = containerRef.value!.getBoundingClientRect()
     selectionPopup.value = {
       visible: true,
@@ -148,27 +244,62 @@ function onMouseUp() {
       y: rect.top - containerRect.top - 44,
     }
   } else {
+    selectedRange = null
     selectionPopup.value.visible = false
   }
 }
 
 function sendSelectionToChat() {
   emit('select-text', selectedText.value)
+  selectedRange = null
   selectionPopup.value.visible = false
   window.getSelection()?.removeAllRanges()
 }
 
 function highlightSelection() {
-  const sel = window.getSelection()
-  if (!sel || sel.rangeCount === 0) return
-  try {
-    const range = sel.getRangeAt(0)
-    const mark = document.createElement('mark')
-    mark.className = 'pdf-highlight'
-    range.surroundContents(mark)
-  } catch { /* cross-node selection, skip */ }
+  if (!selectedRange) return
+  const pages = Array.from(pagesRef.value?.querySelectorAll<HTMLElement>('.pdf-page') ?? [])
+
+  for (const pageDiv of pages) {
+    const textLayer = pageDiv.querySelector<HTMLElement>('.text-layer')
+    if (!textLayer || !selectedRange.intersectsNode(textLayer)) continue
+
+    const candidates: HighlightSegment[] = []
+    const nodes = getTextNodes(textLayer)
+    let offset = 0
+    for (const node of nodes) {
+      const length = node.data.length
+      if (selectedRange.intersectsNode(node)) {
+        let localStart = node === selectedRange.startContainer ? selectedRange.startOffset : 0
+        let localEnd = node === selectedRange.endContainer ? selectedRange.endOffset : length
+        while (localStart < localEnd && /\s/.test(node.data[localStart])) localStart++
+        while (localEnd > localStart && /\s/.test(node.data[localEnd - 1])) localEnd--
+        if (localEnd > localStart) {
+          candidates.push({
+            page: Number(pageDiv.dataset.page),
+            start: offset + localStart,
+            end: offset + localEnd,
+          })
+        }
+      }
+      offset += length
+    }
+
+    const added: HighlightSegment[] = []
+    for (const candidate of candidates) {
+      for (const segment of subtractExisting(candidate)) {
+        highlightSegments.push(segment)
+        added.push(segment)
+      }
+    }
+    for (const segment of added.sort((a, b) => b.start - a.start)) {
+      drawSegment(pageDiv, segment)
+    }
+  }
+
+  selectedRange = null
   selectionPopup.value.visible = false
-  sel.removeAllRanges()
+  window.getSelection()?.removeAllRanges()
 }
 
 onMounted(() => {
@@ -224,10 +355,9 @@ onBeforeUnmount(() => {
 :deep(.text-layer) {
   position: absolute;
   inset: 0;
+  z-index: 2;
   overflow: hidden;
   line-height: 1;
-  opacity: 0.25;
-  --scale-factor: 1;
 }
 :deep(.text-layer span) {
   color: transparent;
@@ -237,7 +367,14 @@ onBeforeUnmount(() => {
   transform-origin: 0 0;
 }
 :deep(.text-layer ::selection) { background: rgba(61, 184, 160, 0.4); }
-:deep(.pdf-highlight) { background: var(--gold); opacity: 0.4; border-radius: 2px; }
+:deep(.pdf-highlight-overlay) {
+  position: absolute;
+  z-index: 1;
+  pointer-events: none;
+  background: rgba(255, 216, 74, 0.46);
+  border-radius: 1px;
+  mix-blend-mode: multiply;
+}
 
 .selection-popup {
   position: absolute;

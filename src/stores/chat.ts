@@ -1,6 +1,10 @@
 import { defineStore } from 'pinia'
 import { ref, computed } from 'vue'
 import { extractPages, buildPageIndex, scoreAndSelect } from '../utils/pageIndex'
+import {
+  ABSTRACT_MODEL,
+  summarizeAcademicText,
+} from '../utils/abstractSummarizer'
 
 export interface LLMProfile {
   id: string
@@ -64,6 +68,7 @@ export const useChatStore = defineStore('chat', () => {
   const loaded = ref(false)
   const indexingPapers = ref<Set<string>>(new Set())
   const indexedPapers = ref<Set<string>>(new Set())
+  const abstractToken = ref('')
 
   const chatProfile = computed(() =>
     profiles.value.find(p => p.id === chatProfileId.value) ?? profiles.value[0],
@@ -71,6 +76,13 @@ export const useChatStore = defineStore('chat', () => {
   const indexProfile = computed(() =>
     profiles.value.find(p => p.id === indexProfileId.value) ?? profiles.value[0],
   )
+
+  // Electron IPC uses structured clone and cannot serialize Vue reactive proxies.
+  // Copy the array and every profile into plain objects before crossing the bridge.
+  async function persistProfiles() {
+    const plainProfiles = profiles.value.map(profile => ({ ...profile }))
+    await window.db.settings.set('llm_profiles', plainProfiles)
+  }
 
   async function init() {
     if (loaded.value) return
@@ -92,7 +104,7 @@ export const useChatStore = defineStore('chat', () => {
         }]
       }
       // 无论是迁移还是全新安装，都将当前 profiles 写入磁盘，确保下次启动可恢复
-      await window.db.settings.set('llm_profiles', profiles.value)
+      await persistProfiles()
     }
 
     const savedChatId = await window.db.settings.get('llm_profile_chat')
@@ -111,6 +123,7 @@ export const useChatStore = defineStore('chat', () => {
 
     const ids = await window.db.index.list()
     indexedPapers.value = new Set(ids)
+    abstractToken.value = (await window.db.settings.get('huggingface_token')) ?? ''
     loaded.value = true
   }
 
@@ -119,7 +132,7 @@ export const useChatStore = defineStore('chat', () => {
   async function addProfile(profile: Omit<LLMProfile, 'id'>): Promise<LLMProfile> {
     const newProfile: LLMProfile = { ...profile, id: crypto.randomUUID() }
     profiles.value.push(newProfile)
-    await window.db.settings.set('llm_profiles', profiles.value)
+    await persistProfiles()
     return newProfile
   }
 
@@ -127,7 +140,7 @@ export const useChatStore = defineStore('chat', () => {
     const idx = profiles.value.findIndex(p => p.id === id)
     if (idx === -1) return
     profiles.value[idx] = { ...profiles.value[idx], ...patch }
-    await window.db.settings.set('llm_profiles', profiles.value)
+    await persistProfiles()
   }
 
   async function removeProfile(id: string) {
@@ -136,7 +149,7 @@ export const useChatStore = defineStore('chat', () => {
     // 若删除的是当前选中项，自动切换到第一个
     if (chatProfileId.value === id) await setChatProfileId(profiles.value[0].id)
     if (indexProfileId.value === id) await setIndexProfileId(profiles.value[0].id)
-    await window.db.settings.set('llm_profiles', profiles.value)
+    await persistProfiles()
   }
 
   async function setChatProfileId(id: string) {
@@ -147,6 +160,11 @@ export const useChatStore = defineStore('chat', () => {
   async function setIndexProfileId(id: string) {
     indexProfileId.value = id
     await window.db.settings.set('llm_profile_index', id)
+  }
+
+  async function setAbstractToken(token: string) {
+    abstractToken.value = token.trim()
+    await window.db.settings.set('huggingface_token', abstractToken.value)
   }
 
   // ---------- LLM Call ----------
@@ -265,6 +283,41 @@ Latest question: ${query}`
     await window.db.chat.updateConversation(convId, { paperIds })
   }
 
+  // ---------- /abstract ----------
+
+  async function readPaperPages(paperId: string): Promise<string[]> {
+    const stored = await window.db.index.get(paperId)
+    if (stored) return JSON.parse(stored.pagesJson)
+
+    const base64 = await window.db.paper.readFile(paperId)
+    if (!base64) throw new Error('找不到论文 PDF 文件')
+    return extractPages(base64)
+  }
+
+  async function generateAbstract(conv: Conversation): Promise<{ content: string; sources: string[] }> {
+    if (conv.paperIds.length === 0) throw new Error('请先在当前对话中选择至少一篇论文')
+    if (!abstractToken.value) throw new Error('请先在设置中填写 Hugging Face Token')
+
+    const sections: string[] = []
+    const sources: string[] = []
+    for (const paperId of conv.paperIds) {
+      const [paper, pages] = await Promise.all([
+        window.db.paper.get(paperId),
+        readPaperPages(paperId),
+      ])
+      const title = paper?.title || `论文 ${sources.length + 1}`
+      const text = pages.join('\n\n')
+      const summary = await summarizeAcademicText(text, abstractToken.value)
+      sections.push(conv.paperIds.length > 1 ? `## ${title}\n\n${summary}` : summary)
+      sources.push(title)
+    }
+
+    return {
+      content: sections.join('\n\n---\n\n'),
+      sources,
+    }
+  }
+
   // ---------- Send Message (RAG 3-call pipeline) ----------
 
   async function sendMessage(convId: string, userMessage: string, context?: string): Promise<string> {
@@ -272,6 +325,12 @@ Latest question: ${query}`
     if (!conv) throw new Error('Conversation not found')
 
     await addMessage(convId, 'user', userMessage)
+
+    if (userMessage.trim().toLowerCase() === '/abstract') {
+      const result = await generateAbstract(conv)
+      await addMessage(convId, 'assistant', result.content, result.sources)
+      return result.content
+    }
 
     let ragSources: string[] = []
     if (!context && conv.paperIds.length > 0) {
@@ -323,11 +382,12 @@ Latest question: ${query}`
   return {
     conversations, profiles, chatProfileId, indexProfileId,
     chatProfile, indexProfile,
-    loaded, indexingPapers, indexedPapers,
+    loaded, indexingPapers, indexedPapers, abstractToken,
     init,
     addProfile, updateProfile, removeProfile,
-    setChatProfileId, setIndexProfileId,
+    setChatProfileId, setIndexProfileId, setAbstractToken,
     newConversation, addMessage, removeConversation, syncPaperIds,
     sendMessage, indexPaper,
+    ABSTRACT_MODEL,
   }
 })
