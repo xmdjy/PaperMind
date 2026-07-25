@@ -182,4 +182,50 @@ describe('useChatStore', () => {
     expect(callCount).toBe(3)
     expect(firstRoundCalls).toBe(2)
   })
+
+  it('/abstract summarizes the selected paper with the dedicated Hugging Face model', async () => {
+    ;(globalThis as any).mockDb.settings.get.mockImplementation((key: string) => {
+      if (key === 'huggingface_token') return Promise.resolve('hf-test')
+      return Promise.resolve(null)
+    })
+    ;(globalThis as any).mockDb.paper.get.mockResolvedValue({
+      id: 'paper-1',
+      title: 'Attention Is All You Need',
+    })
+    ;(globalThis as any).mockDb.index.get.mockResolvedValue({
+      indexJson: '{}',
+      pagesJson: JSON.stringify(['A short academic paper about transformer networks and attention.']),
+    })
+    global.fetch = vi.fn().mockResolvedValue({
+      ok: true,
+      json: () => Promise.resolve([{ summary_text: 'A transformer paper summary.' }]),
+    }) as any
+
+    const store = useChatStore()
+    await store.init()
+    const conv = await store.newConversation('Summary', ['paper-1'])
+    const reply = await store.sendMessage(conv.id, '/abstract')
+
+    expect(reply).toBe('A transformer paper summary.')
+    expect(conv.messages.map(message => message.role)).toEqual(['user', 'assistant'])
+    expect(conv.messages[1].sources).toEqual(['Attention Is All You Need'])
+    expect(global.fetch).toHaveBeenCalledOnce()
+    expect(global.fetch).toHaveBeenCalledWith(
+      'https://api-inference.huggingface.co/models/Bashaarat1/t5-small-arxiv-summarizer',
+      expect.objectContaining({
+        method: 'POST',
+        headers: expect.objectContaining({ Authorization: 'Bearer hf-test' }),
+      }),
+    )
+  })
+
+  it('/abstract requires a selected paper', async () => {
+    const store = useChatStore()
+    await store.init()
+    await store.setAbstractToken('hf-test')
+    const conv = await store.newConversation('Summary', [])
+
+    await expect(store.sendMessage(conv.id, '/abstract'))
+      .rejects.toThrow('请先在当前对话中选择至少一篇论文')
+  })
 })
