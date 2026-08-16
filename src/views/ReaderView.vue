@@ -17,23 +17,40 @@
     <div class="reader-split">
       <!-- Left: PDF -->
       <div class="split-left" :style="{ width: `${splitRatio}%` }">
-        <PdfViewer v-if="pdfUrl" :src="pdfUrl" :paper-id="paper.id" @select-text="onSelectText" />
+        <PdfViewer ref="pdfViewerRef" v-if="pdfUrl" :src="pdfUrl" :paper-id="paper.id" @select-text="onSelectText" />
       </div>
 
       <!-- Resizer -->
       <div class="resizer" role="separator" aria-orientation="vertical" aria-label="调整面板宽度" @mousedown="startResize" />
 
-      <!-- Right: Chat -->
+      <!-- Right: Chat / Notes -->
       <div class="split-right" :style="{ width: `${100 - splitRatio}%` }">
-        <div class="chat-header">
-          <el-select
-            v-model="activeConvId" size="small" placeholder="选择对话" style="flex:1"
-          >
-            <el-option v-for="c in paperConversations" :key="c.id" :label="c.title" :value="c.id" />
-          </el-select>
-          <el-button size="small" @click="createConv"><el-icon><Plus /></el-icon></el-button>
+        <div class="right-tabs">
+          <button
+            type="button"
+            class="right-tab"
+            :class="{ active: rightTab === 'chat' }"
+            @click="rightTab = 'chat'"
+          >对话</button>
+          <button
+            type="button"
+            class="right-tab"
+            :class="{ active: rightTab === 'notes' }"
+            @click="rightTab = 'notes'"
+          >笔记</button>
         </div>
-        <ChatPanel ref="chatPanelRef" :conversation="activeConv" />
+        <template v-if="rightTab === 'chat'">
+          <div class="chat-header">
+            <el-select
+              v-model="activeConvId" size="small" placeholder="选择对话" style="flex:1"
+            >
+              <el-option v-for="c in paperConversations" :key="c.id" :label="c.title" :value="c.id" />
+            </el-select>
+            <el-button size="small" @click="createConv"><el-icon><Plus /></el-icon></el-button>
+          </div>
+          <ChatPanel ref="chatPanelRef" :conversation="activeConv" />
+        </template>
+        <NotesPanel v-else :paper-id="paper.id" @jump="jumpToPage" />
       </div>
     </div>
   </div>
@@ -46,6 +63,7 @@ import { useRoute } from 'vue-router'
 import { ArrowLeft, Plus } from '@element-plus/icons-vue'
 import PdfViewer from '../components/PdfViewer.vue'
 import ChatPanel from '../components/ChatPanel.vue'
+import NotesPanel from '../components/NotesPanel.vue'
 import { usePaperStore } from '../stores/paper'
 import { useChatStore } from '../stores/chat'
 import { base64ToUrl } from '../utils/pdfUtils'
@@ -57,7 +75,13 @@ const paper = computed(() => paperStore.getPaper(route.params.id as string))
 const pdfUrl = ref('')
 const splitRatio = ref(58)
 const chatPanelRef = ref<InstanceType<typeof ChatPanel>>()
+const pdfViewerRef = ref<InstanceType<typeof PdfViewer>>()
+const rightTab = ref<'chat' | 'notes'>('chat')
 const activeConvId = ref('')
+
+function jumpToPage(page: number) {
+  pdfViewerRef.value?.scrollToPage(page)
+}
 
 const paperConversations = computed(() =>
   chatStore.conversations.filter(c => c.paperIds.includes(paper.value?.id ?? ''))
@@ -155,4 +179,23 @@ onBeforeUnmount(() => {
   border-bottom: 1px solid var(--border);
   background: color-mix(in srgb, var(--bg-surface) 92%, transparent);
 }
+
+.right-tabs {
+  display: flex;
+  border-bottom: 1px solid var(--border);
+  background: color-mix(in srgb, var(--bg-surface) 92%, transparent);
+  flex-shrink: 0;
+}
+.right-tab {
+  flex: 1;
+  padding: 9px 0;
+  border: none;
+  background: transparent;
+  font-size: 12px;
+  color: var(--text-secondary);
+  cursor: pointer;
+  font-family: inherit;
+  border-bottom: 2px solid transparent;
+}
+.right-tab.active { color: var(--accent); border-bottom-color: var(--accent); font-weight: 500; }
 </style>
