@@ -81,10 +81,34 @@ export const usePaperStore = defineStore('paper', () => {
     return papers.value.find(p => p.id === id)
   }
 
+  // ---------- Highlights ----------
+
+  async function addHighlight(h: {
+    paperId: string
+    text: string
+    pageNum: number
+    color: string
+    note: string
+    startOffset: number
+    endOffset: number
+  }) {
+    const highlight = { id: crypto.randomUUID(), ...h, createdAt: Date.now() }
+    await window.db.highlight.create(highlight)
+    return highlight
+  }
+
+  async function getHighlights(paperId: string) {
+    return window.db.highlight.listByPaper(paperId)
+  }
+
+  async function removeHighlight(id: string) {
+    await window.db.highlight.remove(id)
+  }
+
   return {
     papers, knowledgeBases, loaded, init,
     addKnowledgeBase, removeKnowledgeBase,
     addPaper, removePaper, updatePaper, readPaperFile,
-    getPapersByKb, getPaper,
+    getPapersByKb, getPaper, addHighlight, getHighlights, removeHighlight,
   }
 })

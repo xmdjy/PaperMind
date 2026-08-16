@@ -82,4 +82,28 @@ describe('usePaperStore', () => {
     expect(store.getPapersByKb('kb1').value).toHaveLength(1)
     expect(store.getPapersByKb('default').value).toHaveLength(1)
   })
+
+  it('addHighlight persists via IPC and returns the highlight', async () => {
+    const store = usePaperStore()
+    await store.init()
+    const h = await store.addHighlight({
+      paperId: 'p1', text: 'important', pageNum: 2, color: '#c9a84c',
+      note: '', startOffset: 10, endOffset: 19,
+    })
+    expect(h.id).toBeTruthy()
+    expect((globalThis as any).mockDb.highlight.create).toHaveBeenCalledWith(
+      expect.objectContaining({ paperId: 'p1', startOffset: 10, endOffset: 19 }),
+    )
+  })
+
+  it('getHighlights returns highlights for a paper', async () => {
+    ;(globalThis as any).mockDb.highlight.listByPaper.mockResolvedValue([
+      { id: 'h1', paperId: 'p1', text: 'x', pageNum: 1, color: '#c9a84c', note: '', startOffset: 0, endOffset: 1, createdAt: 0 },
+    ])
+    const store = usePaperStore()
+    await store.init()
+    const list = await store.getHighlights('p1')
+    expect(list).toHaveLength(1)
+    expect(list[0].id).toBe('h1')
+  })
 })
