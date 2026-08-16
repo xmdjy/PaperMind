@@ -58,7 +58,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, computed, onMounted, onBeforeUnmount } from 'vue'
+import { ref, computed, onMounted, onBeforeUnmount, nextTick } from 'vue'
 import { useRoute } from 'vue-router'
 import { ArrowLeft, Plus } from '@element-plus/icons-vue'
 import PdfViewer from '../components/PdfViewer.vue'
@@ -100,6 +100,10 @@ async function createConv() {
 
 async function onSelectText(text: string) {
   if (!activeConv.value) await createConv()
+  if (rightTab.value !== 'chat') {
+    rightTab.value = 'chat'
+    await nextTick()
+  }
   chatPanelRef.value?.addContext(text)
 }
 
