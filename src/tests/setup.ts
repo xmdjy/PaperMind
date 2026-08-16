@@ -39,6 +39,7 @@ const mockDb = {
   data: {
     export: vi.fn().mockResolvedValue({}),
     clear: vi.fn().mockResolvedValue(undefined),
+    import: vi.fn().mockResolvedValue(undefined),
   },
 }
 
