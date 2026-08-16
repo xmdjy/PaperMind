@@ -46,6 +46,8 @@ CREATE TABLE IF NOT EXISTS highlights (
   page_num    INTEGER DEFAULT 0,
   color       TEXT DEFAULT '#c9a84c',
   note        TEXT DEFAULT '',
+  start_offset INTEGER DEFAULT 0,
+  end_offset   INTEGER DEFAULT 0,
   created_at  INTEGER NOT NULL,
   FOREIGN KEY (paper_id) REFERENCES papers(id) ON DELETE CASCADE
 );

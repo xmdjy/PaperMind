@@ -18,6 +18,11 @@ export function initDb() {
   db.pragma('foreign_keys = ON')
   db.exec(SCHEMA)
 
+  // Migration: highlight character offsets (added 2026-08-16)
+  const highlightCols = (db.prepare('PRAGMA table_info(highlights)').all() as Array<{ name: string }>).map(c => c.name)
+  if (!highlightCols.includes('start_offset')) db.exec('ALTER TABLE highlights ADD COLUMN start_offset INTEGER DEFAULT 0')
+  if (!highlightCols.includes('end_offset')) db.exec('ALTER TABLE highlights ADD COLUMN end_offset INTEGER DEFAULT 0')
+
   // Seed default knowledge base
   const count = (db.prepare('SELECT COUNT(*) AS n FROM knowledge_bases').get() as { n: number }).n
   if (count === 0) {
@@ -141,11 +146,23 @@ export const chatApi = {
 
 // ---------- Highlights ----------
 export const highlightApi = {
-  listByPaper: (paperId: string) =>
-    db.prepare('SELECT * FROM highlights WHERE paper_id = ? ORDER BY created_at ASC').all(paperId),
-  create: (h: { id: string; paperId: string; text: string; pageNum: number; color: string; note: string; createdAt: number }) => {
-    db.prepare('INSERT INTO highlights (id, paper_id, text, page_num, color, note, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)')
-      .run(h.id, h.paperId, h.text, h.pageNum, h.color, h.note, h.createdAt)
+  listByPaper: (paperId: string) => {
+    const rows = db.prepare('SELECT * FROM highlights WHERE paper_id = ? ORDER BY created_at ASC').all(paperId) as any[]
+    return rows.map(r => ({
+      id: r.id,
+      paperId: r.paper_id,
+      text: r.text,
+      pageNum: r.page_num,
+      color: r.color,
+      note: r.note,
+      startOffset: r.start_offset,
+      endOffset: r.end_offset,
+      createdAt: r.created_at,
+    }))
+  },
+  create: (h: { id: string; paperId: string; text: string; pageNum: number; color: string; note: string; startOffset?: number; endOffset?: number; createdAt: number }) => {
+    db.prepare('INSERT INTO highlights (id, paper_id, text, page_num, color, note, start_offset, end_offset, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)')
+      .run(h.id, h.paperId, h.text, h.pageNum, h.color, h.note, h.startOffset ?? 0, h.endOffset ?? 0, h.createdAt)
     return h
   },
   remove: (id: string) => db.prepare('DELETE FROM highlights WHERE id = ?').run(id),
