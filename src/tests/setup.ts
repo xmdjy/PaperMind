@@ -26,6 +26,7 @@ const mockDb = {
     listByPaper: vi.fn().mockResolvedValue([]),
     create: vi.fn().mockImplementation(h => Promise.resolve(h)),
     remove: vi.fn().mockResolvedValue(undefined),
+    update: vi.fn().mockResolvedValue(undefined),
   },
   settings: {
     get: vi.fn().mockResolvedValue(null),

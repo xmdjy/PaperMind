@@ -26,6 +26,7 @@ const db = {
     listByPaper: (paperId: string) => ipcRenderer.invoke('highlight:listByPaper', paperId),
     create: (h: unknown) => ipcRenderer.invoke('highlight:create', h),
     remove: (id: string) => ipcRenderer.invoke('highlight:remove', id),
+    update: (id: string, patch: unknown) => ipcRenderer.invoke('highlight:update', id, patch),
   },
   settings: {
     get: (key: string) => ipcRenderer.invoke('settings:get', key),

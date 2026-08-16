@@ -166,6 +166,11 @@ export const highlightApi = {
     return h
   },
   remove: (id: string) => db.prepare('DELETE FROM highlights WHERE id = ?').run(id),
+  update: (id: string, patch: { note?: string }) => {
+    const cur = db.prepare('SELECT * FROM highlights WHERE id = ?').get(id) as any
+    if (!cur) return
+    db.prepare('UPDATE highlights SET note = ? WHERE id = ?').run(patch.note ?? cur.note, id)
+  },
 }
 
 // ---------- Settings (key-value, e.g. LLM config) ----------

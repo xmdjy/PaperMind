@@ -26,6 +26,7 @@ export function registerIpc() {
     'highlight:listByPaper': (_e, paperId) => highlightApi.listByPaper(paperId),
     'highlight:create': (_e, h) => highlightApi.create(h),
     'highlight:remove': (_e, id) => highlightApi.remove(id),
+    'highlight:update': (_e, id, patch) => highlightApi.update(id, patch),
     // settings
     'settings:get': (_e, key) => settingsApi.get(key),
     'settings:set': (_e, key, value) => settingsApi.set(key, value),

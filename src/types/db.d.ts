@@ -24,6 +24,7 @@ export interface DbApi {
     listByPaper: (paperId: string) => Promise<any[]>
     create: (h: any) => Promise<any>
     remove: (id: string) => Promise<void>
+    update: (id: string, patch: any) => Promise<void>
   }
   settings: {
     get: (key: string) => Promise<any | null>
