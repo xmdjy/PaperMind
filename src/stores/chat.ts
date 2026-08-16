@@ -1,6 +1,7 @@
 import { defineStore } from 'pinia'
 import { ref, computed } from 'vue'
 import { extractPages, buildPageIndex, scoreAndSelect } from '../utils/pageIndex'
+import { rewriteQuery } from '../utils/queryRewrite'
 import {
   ABSTRACT_MODEL,
   summarizeAcademicText,
@@ -49,6 +50,18 @@ const DEFAULT_PROFILE: LLMProfile = {
 }
 
 const MATH_FORMAT_INSTRUCTION = '数学公式请使用 LaTeX：行内公式使用 $...$，独立公式使用 $$...$$。不要使用 \\(...\\) 或 \\[...\\] 包裹公式。'
+
+async function readErrorBody(res: Response): Promise<string> {
+  try {
+    const data = await res.json()
+    const err = data?.error
+    if (typeof err === 'string' && err) return err
+    if (err && typeof err === 'object' && typeof err.message === 'string') return err.message
+    if (typeof data?.message === 'string' && data.message) return data.message
+    if (typeof data?.detail === 'string' && data.detail) return data.detail
+  } catch { /* fall through to status text */ }
+  return `${res.status} ${res.statusText}`.trim()
+}
 
 const PROMPT_TEMPLATES = [
   { name: '逐段精读', prompt: '请逐段解析以下内容，解释关键概念、方法和结论。' },
@@ -185,54 +198,65 @@ export const useChatStore = defineStore('chat', () => {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(body),
       })
+      if (!res.ok) throw new Error(`LLM 请求失败 (${res.status})：${await readErrorBody(res)}`)
       const data = await res.json()
-      return data.message?.content ?? ''
+      if (typeof data.message?.content !== 'string') throw new Error('Ollama 未返回有效响应')
+      return data.message.content
     }
 
-    const headers: Record<string, string> = { 'Content-Type': 'application/json' }
-    if (profile.provider === 'openai') headers['Authorization'] = `Bearer ${profile.apiKey}`
     if (profile.provider === 'anthropic') {
-      headers['x-api-key'] = profile.apiKey
-      headers['anthropic-version'] = '2023-06-01'
+      const system = messages.filter(m => m.role === 'system').map(m => m.content).join('\n\n')
+      const chatMessages = messages
+        .filter(m => m.role !== 'system')
+        .map(m => ({ role: m.role, content: m.content }))
+      while (chatMessages.length > 0 && chatMessages[0].role === 'assistant') chatMessages.shift()
+
+      const body: Record<string, unknown> = {
+        model: profile.model,
+        max_tokens: profile.maxTokens,
+        messages: chatMessages,
+        temperature: Math.min(profile.temperature, 1),
+      }
+      if (system) body.system = system
+      if (profile.topK > 0) body.top_k = profile.topK
+
+      const res = await fetch(`${profile.baseUrl}/v1/messages`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'x-api-key': profile.apiKey,
+          'anthropic-version': '2023-06-01',
+        },
+        body: JSON.stringify(body),
+      })
+      if (!res.ok) throw new Error(`LLM 请求失败 (${res.status})：${await readErrorBody(res)}`)
+      const data = await res.json()
+      const content = data.content?.[0]?.text
+      if (typeof content !== 'string') throw new Error('Anthropic 未返回有效响应')
+      return content
     }
 
+    const headers: Record<string, string> = {
+      'Content-Type': 'application/json',
+      Authorization: `Bearer ${profile.apiKey}`,
+    }
     const body: Record<string, unknown> = {
       model: profile.model,
       messages,
       temperature: profile.temperature,
       max_tokens: profile.maxTokens,
     }
-    if (profile.provider === 'anthropic' && profile.topK > 0) body.top_k = profile.topK
 
     const res = await fetch(`${profile.baseUrl}/chat/completions`, {
       method: 'POST',
       headers,
       body: JSON.stringify(body),
     })
+    if (!res.ok) throw new Error(`LLM 请求失败 (${res.status})：${await readErrorBody(res)}`)
     const data = await res.json()
-    return data.choices?.[0]?.message?.content ?? ''
-  }
-
-  // ---------- Query Rewrite ----------
-
-  async function rewriteQuery(
-    query: string,
-    history: Message[],
-    llmFn: (prompt: string) => Promise<string>,
-  ): Promise<string> {
-    const historyText = history.map(m => `${m.role}: ${m.content}`).join('\n')
-    const prompt = `Based on the following conversation, rewrite the user's latest question as a self-contained retrieval query. Resolve pronouns, expand abbreviations, preserve technical terms. Return ONLY the rewritten query, no explanation.
-
-Conversation:
-${historyText}
-
-Latest question: ${query}`
-    try {
-      const result = await llmFn(prompt)
-      return result.trim() || query
-    } catch {
-      return query
-    }
+    const content = data.choices?.[0]?.message?.content
+    if (typeof content !== 'string') throw new Error('LLM 未返回有效响应')
+    return content
   }
 
   // ---------- Index Paper ----------

@@ -99,6 +99,7 @@ describe('useChatStore', () => {
 
   it('sendMessage calls LLM and appends both messages', async () => {
     global.fetch = vi.fn().mockResolvedValue({
+      ok: true,
       json: () => Promise.resolve({ choices: [{ message: { content: 'Answer' } }] }),
     }) as any
     const store = useChatStore()
@@ -117,6 +118,7 @@ describe('useChatStore', () => {
     global.fetch = vi.fn().mockImplementation(() => {
       callCount++
       return Promise.resolve({
+        ok: true,
         json: () => Promise.resolve({ choices: [{ message: { content: 'Answer' } }] }),
       })
     }) as any
@@ -146,6 +148,7 @@ describe('useChatStore', () => {
     global.fetch = vi.fn().mockImplementation(() => {
       callCount++
       return Promise.resolve({
+        ok: true,
         json: () => Promise.resolve({
           choices: [{ message: { content: '[{"id":0,"score":9},{"id":1,"score":2}]' } }],
         }),
@@ -227,5 +230,50 @@ describe('useChatStore', () => {
 
     await expect(store.sendMessage(conv.id, '/abstract'))
       .rejects.toThrow('请先在当前对话中选择至少一篇论文')
+  })
+
+  it('sendMessage rejects with a readable error when the LLM returns non-200', async () => {
+    global.fetch = vi.fn().mockResolvedValue({
+      ok: false,
+      status: 401,
+      statusText: 'Unauthorized',
+      json: () => Promise.resolve({ error: { message: 'Invalid API key' } }),
+    }) as any
+    const store = useChatStore()
+    await store.init()
+    await store.updateProfile(store.chatProfile.id, { apiKey: 'sk-bad' })
+    const conv = await store.newConversation('Chat', [])
+
+    await expect(store.sendMessage(conv.id, 'hi'))
+      .rejects.toThrow(/LLM 请求失败 \(401\).*Invalid API key/)
+  })
+
+  it('anthropic provider calls the Messages API and parses content[0].text', async () => {
+    global.fetch = vi.fn().mockResolvedValue({
+      ok: true,
+      status: 200,
+      statusText: 'OK',
+      json: () => Promise.resolve({ content: [{ type: 'text', text: 'Bonjour' }] }),
+    }) as any
+    const store = useChatStore()
+    await store.init()
+    await store.updateProfile(store.chatProfile.id, {
+      provider: 'anthropic',
+      model: 'claude-3-5-sonnet',
+      apiKey: 'sk-ant-1',
+      baseUrl: 'https://api.anthropic.com',
+    })
+    const conv = await store.newConversation('Chat', [])
+    const reply = await store.sendMessage(conv.id, 'hello')
+    expect(reply).toBe('Bonjour')
+
+    const [url, init] = (global.fetch as any).mock.calls[0]
+    expect(url).toBe('https://api.anthropic.com/v1/messages')
+    expect(init.headers).toMatchObject({ 'x-api-key': 'sk-ant-1', 'anthropic-version': '2023-06-01' })
+    const body = JSON.parse(init.body)
+    expect(body.model).toBe('claude-3-5-sonnet')
+    expect(body.max_tokens).toBe(2048)
+    expect(body.messages.every((m: any) => m.role !== 'system')).toBe(true)
+    expect(body.system).toContain('学术论文阅读助手')
   })
 })
