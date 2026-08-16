@@ -1,7 +1,7 @@
 import Database from 'better-sqlite3'
 import { app } from 'electron'
 import { join } from 'path'
-import { mkdirSync, writeFileSync, readFileSync, unlinkSync, existsSync } from 'fs'
+import { mkdirSync, writeFileSync, readFileSync, unlinkSync, existsSync, readdirSync } from 'fs'
 import { SCHEMA } from './schema'
 
 let db: Database.Database
@@ -194,10 +194,19 @@ export const indexApi = {
 }
 
 export function exportAll() {
+  const paperRows = db.prepare('SELECT * FROM papers ORDER BY added_at DESC').all() as any[]
+  const papers = paperRows.map(row => ({
+    ...deserializePaper(row),
+    fileData: existsSync(row.file_path) ? readFileSync(row.file_path).toString('base64') : null,
+  }))
   return {
+    version: 1,
+    exportedAt: Date.now(),
     knowledgeBases: kbApi.list(),
-    papers: paperApi.list(),
+    papers,
     conversations: chatApi.listConversations(),
+    highlights: db.prepare('SELECT * FROM highlights').all(),
+    paperIndexes: db.prepare('SELECT paper_id, index_json, pages_json FROM paper_indexes').all(),
     settings: db.prepare('SELECT * FROM settings').all(),
   }
 }
@@ -208,4 +217,81 @@ export function clearAll() {
   db.exec('DELETE FROM messages; DELETE FROM conversations; DELETE FROM highlights; DELETE FROM papers; DELETE FROM knowledge_bases; DELETE FROM settings;')
   db.prepare('INSERT INTO knowledge_bases (id, name, description, color, created_at) VALUES (?, ?, ?, ?, ?)')
     .run('default', '默认知识库', '未分类论文', '#3db8a0', Date.now())
+}
+
+export function importAll(data: any) {
+  if (!data || data.version !== 1) throw new Error('不支持的备份文件格式（version 必须为 1）')
+
+  const kbs = Array.isArray(data.knowledgeBases) ? data.knowledgeBases : []
+  const papers = Array.isArray(data.papers) ? data.papers : []
+  const conversations = Array.isArray(data.conversations) ? data.conversations : []
+  const highlights = Array.isArray(data.highlights) ? data.highlights : []
+  const indexes = Array.isArray(data.paperIndexes) ? data.paperIndexes : []
+  const settings = Array.isArray(data.settings) ? data.settings : []
+
+  // 1) 先写回备份中的 PDF（幂等覆盖，不影响旧库）
+  for (const p of papers) {
+    if (p && typeof p.id === 'string' && typeof p.fileData === 'string') {
+      writeFileSync(join(papersDir, `${p.id}.pdf`), Buffer.from(p.fileData, 'base64'))
+    }
+  }
+
+  // 2) DB 事务：清空旧行并按依赖顺序写入
+  const insert = db.transaction(() => {
+    db.exec('DELETE FROM messages; DELETE FROM conversations; DELETE FROM highlights; DELETE FROM paper_indexes; DELETE FROM papers; DELETE FROM knowledge_bases; DELETE FROM settings;')
+
+    for (const kb of kbs) {
+      db.prepare('INSERT INTO knowledge_bases (id, name, description, color, created_at) VALUES (?, ?, ?, ?, ?)')
+        .run(kb.id, kb.name, kb.description ?? '', kb.color ?? '#3db8a0', kb.createdAt ?? Date.now())
+    }
+
+    for (const p of papers) {
+      db.prepare(`INSERT INTO papers
+        (id, knowledge_base_id, title, authors, abstract, year, tags, status, file_name, file_path, added_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
+        .run(p.id, p.knowledgeBaseId, p.title ?? '', JSON.stringify(p.authors ?? []),
+          p.abstract ?? '', p.year ?? 0, JSON.stringify(p.tags ?? []), p.status ?? 'unread',
+          p.fileName ?? '', join(papersDir, `${p.id}.pdf`), p.addedAt ?? Date.now())
+    }
+
+    for (const c of conversations) {
+      db.prepare('INSERT INTO conversations (id, title, paper_ids, created_at) VALUES (?, ?, ?, ?)')
+        .run(c.id, c.title, JSON.stringify(c.paperIds ?? []), c.createdAt ?? Date.now())
+      for (const m of (c.messages ?? [])) {
+        db.prepare('INSERT INTO messages (id, conversation_id, role, content, sources, timestamp) VALUES (?, ?, ?, ?, ?, ?)')
+          .run(m.id, c.id, m.role, m.content, JSON.stringify(m.sources ?? []), m.timestamp ?? Date.now())
+      }
+    }
+
+    for (const h of highlights) {
+      db.prepare('INSERT INTO highlights (id, paper_id, text, page_num, color, note, start_offset, end_offset, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)')
+        .run(h.id, h.paper_id ?? h.paperId, h.text, h.page_num ?? h.pageNum ?? 0, h.color ?? '#c9a84c',
+          h.note ?? '', h.start_offset ?? h.startOffset ?? 0, h.end_offset ?? h.endOffset ?? 0,
+          h.created_at ?? h.createdAt ?? Date.now())
+    }
+
+    for (const ix of indexes) {
+      db.prepare('INSERT INTO paper_indexes (paper_id, index_json, pages_json, created_at) VALUES (?, ?, ?, ?)')
+        .run(ix.paper_id ?? ix.paperId, ix.index_json ?? ix.indexJson, ix.pages_json ?? ix.pagesJson, Date.now())
+    }
+
+    for (const s of settings) {
+      db.prepare('INSERT INTO settings (key, value) VALUES (?, ?)').run(s.key, s.value)
+    }
+  })
+
+  insert()
+
+  // 3) 清理未被备份引用的孤儿 PDF
+  const wanted = new Set(papers.filter((p: any) => typeof p.id === 'string').map((p: any) => `${p.id}.pdf`))
+  for (const name of readdirSync(papersDir)) {
+    if (name.endsWith('.pdf') && !wanted.has(name)) unlinkSync(join(papersDir, name))
+  }
+
+  // 4) 保证至少一个知识库
+  const kbCount = (db.prepare('SELECT COUNT(*) AS n FROM knowledge_bases').get() as { n: number }).n
+  if (kbCount === 0) {
+    db.prepare('INSERT INTO knowledge_bases (id, name, description, color, created_at) VALUES (?, ?, ?, ?, ?)')
+      .run('default', '默认知识库', '未分类论文', '#3db8a0', Date.now())
+  }
 }

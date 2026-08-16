@@ -32,6 +32,7 @@ export interface DbApi {
   data: {
     export: () => Promise<any>
     clear: () => Promise<void>
+    import: (data: any) => Promise<void>
   }
   index: {
     list: () => Promise<string[]>

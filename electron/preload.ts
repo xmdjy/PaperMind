@@ -34,6 +34,7 @@ const db = {
   data: {
     export: () => ipcRenderer.invoke('data:export'),
     clear: () => ipcRenderer.invoke('data:clear'),
+    import: (data: unknown) => ipcRenderer.invoke('data:import', data),
   },
   index: {
     list: () => ipcRenderer.invoke('index:list'),
