@@ -1,4 +1,4 @@
-export type LLMFn = (prompt: string) => Promise<string>
+import type { LLMFn } from './llm'
 
 /** 对话中的一轮消息。结构上兼容 chat.ts 的 Message，避免反向依赖 store。 */
 export interface ChatTurn {

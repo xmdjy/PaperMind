@@ -1,4 +1,5 @@
 import * as pdfjsLib from 'pdfjs-dist/legacy/build/pdf.mjs'
+import type { LLMFn } from './llm'
 
 pdfjsLib.GlobalWorkerOptions.workerSrc = './pdf.worker.min.mjs'
 
@@ -61,8 +62,6 @@ export interface IndexNode {
   summary: string
   nodes: IndexNode[]
 }
-
-export type LLMFn = (prompt: string) => Promise<string>
 
 const CHUNK = 5 // pages per leaf
 
