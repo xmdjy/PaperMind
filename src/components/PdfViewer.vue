@@ -327,6 +327,8 @@ onBeforeUnmount(() => {
   scrollRef.value?.removeEventListener('scroll', onScroll)
   containerRef.value?.removeEventListener('mouseup', onMouseUp)
 })
+
+defineExpose({ scrollToPage })
 </script>
 
 <style scoped>
