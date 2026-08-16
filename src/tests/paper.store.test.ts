@@ -106,4 +106,39 @@ describe('usePaperStore', () => {
     expect(list).toHaveLength(1)
     expect(list[0].id).toBe('h1')
   })
+
+  it('loadHighlights populates the reactive highlights list', async () => {
+    ;(globalThis as any).mockDb.highlight.listByPaper.mockResolvedValue([
+      { id: 'h1', paperId: 'p1', text: 'x', pageNum: 1, color: '#c9a84c', note: '', startOffset: 0, endOffset: 1, createdAt: 0 },
+    ])
+    const store = usePaperStore()
+    await store.init()
+    await store.loadHighlights('p1')
+    expect(store.highlights).toHaveLength(1)
+    expect(store.highlights[0].id).toBe('h1')
+  })
+
+  it('updateHighlight calls IPC and merges locally', async () => {
+    ;(globalThis as any).mockDb.highlight.listByPaper.mockResolvedValue([
+      { id: 'h1', paperId: 'p1', text: 'x', pageNum: 1, color: '#c9a84c', note: '', startOffset: 0, endOffset: 1, createdAt: 0 },
+    ])
+    const store = usePaperStore()
+    await store.init()
+    await store.loadHighlights('p1')
+    await store.updateHighlight('h1', { note: 'my note' })
+    expect((globalThis as any).mockDb.highlight.update).toHaveBeenCalledWith('h1', { note: 'my note' })
+    expect(store.highlights[0].note).toBe('my note')
+  })
+
+  it('removeHighlight filters the reactive list', async () => {
+    ;(globalThis as any).mockDb.highlight.listByPaper.mockResolvedValue([
+      { id: 'h1', paperId: 'p1', text: 'x', pageNum: 1, color: '#c9a84c', note: '', startOffset: 0, endOffset: 1, createdAt: 0 },
+    ])
+    const store = usePaperStore()
+    await store.init()
+    await store.loadHighlights('p1')
+    await store.removeHighlight('h1')
+    expect((globalThis as any).mockDb.highlight.remove).toHaveBeenCalledWith('h1')
+    expect(store.highlights).toHaveLength(0)
+  })
 })

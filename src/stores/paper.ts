@@ -22,9 +22,22 @@ export interface KnowledgeBase {
   createdAt: number
 }
 
+export interface Highlight {
+  id: string
+  paperId: string
+  text: string
+  pageNum: number
+  color: string
+  note: string
+  startOffset: number
+  endOffset: number
+  createdAt: number
+}
+
 export const usePaperStore = defineStore('paper', () => {
   const papers = ref<Paper[]>([])
   const knowledgeBases = ref<KnowledgeBase[]>([])
+  const highlights = ref<Highlight[]>([])
   const loaded = ref(false)
 
   async function init() {
@@ -94,6 +107,7 @@ export const usePaperStore = defineStore('paper', () => {
   }) {
     const highlight = { id: crypto.randomUUID(), ...h, createdAt: Date.now() }
     await window.db.highlight.create(highlight)
+    highlights.value.push(highlight)
     return highlight
   }
 
@@ -101,14 +115,26 @@ export const usePaperStore = defineStore('paper', () => {
     return window.db.highlight.listByPaper(paperId)
   }
 
+  async function loadHighlights(paperId: string) {
+    highlights.value = await window.db.highlight.listByPaper(paperId)
+  }
+
+  async function updateHighlight(id: string, patch: Partial<Pick<Highlight, 'note'>>) {
+    await window.db.highlight.update(id, patch)
+    const idx = highlights.value.findIndex(h => h.id === id)
+    if (idx !== -1) highlights.value[idx] = { ...highlights.value[idx], ...patch }
+  }
+
   async function removeHighlight(id: string) {
     await window.db.highlight.remove(id)
+    highlights.value = highlights.value.filter(h => h.id !== id)
   }
 
   return {
     papers, knowledgeBases, loaded, init,
     addKnowledgeBase, removeKnowledgeBase,
     addPaper, removePaper, updatePaper, readPaperFile,
-    getPapersByKb, getPaper, addHighlight, getHighlights, removeHighlight,
+    getPapersByKb, getPaper, highlights,
+    addHighlight, getHighlights, loadHighlights, updateHighlight, removeHighlight,
   }
 })
