@@ -140,13 +140,42 @@ export async function buildPageIndex(pages: string[], llm: LLMFn): Promise<Index
   return { title, nodeId: 'root', startPage: 0, endPage: pages.length - 1, summary, nodes: leaves }
 }
 
-/** 对所有叶节点打分，返回 Top-2 合并上下文。JSON 解析失败时降级为第一节点。 */
+export interface NodeScore {
+  id: number
+  score: number
+}
+
+export interface ScoreOptions {
+  /** 最多选取几个节点（含最高分节点本身），默认 2 */
+  topK?: number
+  /** 除最高分节点外，其余节点纳入所需的最低分，默认 4 */
+  minScore?: number
+}
+
+export interface RetrievalResult {
+  context: string
+  sources: string[]
+  /** 结构化选中节点（含页码区间），供评测直接取用，无需解析 sources 字符串 */
+  selected: IndexNode[]
+  /** LLM 返回的原始打分；降级或短路时为空数组 */
+  scores: NodeScore[]
+  /** 是否走了降级路径（LLM 响应不可用，回退到第一个节点） */
+  degraded: boolean
+}
+
+function formatSource(n: IndexNode): string {
+  return `Pages ${n.startPage + 1}–${n.endPage + 1}: ${n.title}`
+}
+
+/** 对所有叶节点打分，返回 Top-K 合并上下文。JSON 解析失败时降级为第一节点。 */
 export async function scoreAndSelect(
   root: IndexNode,
   pages: string[],
   query: string,
   llm: LLMFn,
-): Promise<{ context: string; sources: string[] }> {
+  opts: ScoreOptions = {},
+): Promise<RetrievalResult> {
+  const { topK = 2, minScore = 4 } = opts
   // 收集叶节点（无子节点的节点）
   const leaves = root.nodes.length > 0 ? root.nodes : [root]
 
@@ -155,7 +184,10 @@ export async function scoreAndSelect(
     const leaf = leaves[0]
     return {
       context: pages.slice(leaf.startPage, leaf.endPage + 1).join('\n\n'),
-      sources: [`Pages ${leaf.startPage + 1}–${leaf.endPage + 1}: ${leaf.title}`],
+      sources: [formatSource(leaf)],
+      selected: [leaf],
+      scores: [],
+      degraded: false,
     }
   }
 
@@ -163,17 +195,24 @@ export async function scoreAndSelect(
   const prompt = `Query: ${query}\n\nSections:\n${options}\n\nRate each section's relevance to the query (0-10).\nReturn JSON only: [{"id":0,"score":8},{"id":1,"score":2},...]`
 
   let selected: IndexNode[]
+  let scores: NodeScore[] = []
+  let degraded = false
   try {
     const raw = (await llm(prompt)).replace(/```json\n?|```/g, '').trim()
-    const scores = JSON.parse(raw) as Array<{ id: number; score: number }>
+    scores = JSON.parse(raw) as NodeScore[]
     const sorted = [...scores].sort((a, b) => b.score - a.score)
 
+    // 最高分节点无条件纳入；其余需达到 minScore
     const picked: IndexNode[] = [leaves[sorted[0].id]]
-    if (sorted[1] && sorted[1].score >= 4) picked.push(leaves[sorted[1].id])
+    for (const s of sorted.slice(1, topK)) {
+      if (s.score >= minScore) picked.push(leaves[s.id])
+    }
 
     // 按文档顺序排列（startPage 升序）
     selected = picked.sort((a, b) => a.startPage - b.startPage)
   } catch {
+    scores = []
+    degraded = true
     selected = [leaves[0]]
   }
 
@@ -181,9 +220,5 @@ export async function scoreAndSelect(
     .map(n => pages.slice(n.startPage, n.endPage + 1).join('\n\n'))
     .join('\n\n---\n\n')
 
-  const sources = selected.map(
-    n => `Pages ${n.startPage + 1}–${n.endPage + 1}: ${n.title}`,
-  )
-
-  return { context, sources }
+  return { context, sources: selected.map(formatSource), selected, scores, degraded }
 }
