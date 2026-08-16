@@ -17,7 +17,7 @@
     <div class="reader-split">
       <!-- Left: PDF -->
       <div class="split-left" :style="{ width: `${splitRatio}%` }">
-        <PdfViewer v-if="pdfUrl" :src="pdfUrl" @select-text="onSelectText" />
+        <PdfViewer v-if="pdfUrl" :src="pdfUrl" :paper-id="paper.id" @select-text="onSelectText" />
       </div>
 
       <!-- Resizer -->

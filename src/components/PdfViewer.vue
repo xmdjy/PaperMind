@@ -37,8 +37,10 @@
 import { ref, onMounted, onBeforeUnmount, computed } from 'vue'
 import * as pdfjsLib from 'pdfjs-dist/legacy/build/pdf.mjs'
 import { ArrowUp, ArrowDown, ZoomIn, ZoomOut, ChatLineSquare, EditPen } from '@element-plus/icons-vue'
+import { usePaperStore } from '../stores/paper'
 
-const props = defineProps<{ src: string }>()
+const props = defineProps<{ src: string; paperId: string }>()
+const paperStore = usePaperStore()
 const emit = defineEmits<{ (e: 'select-text', text: string): void }>()
 
 pdfjsLib.GlobalWorkerOptions.workerSrc = './pdf.worker.min.mjs'
@@ -290,6 +292,15 @@ function highlightSelection() {
       for (const segment of subtractExisting(candidate)) {
         highlightSegments.push(segment)
         added.push(segment)
+        paperStore.addHighlight({
+          paperId: props.paperId,
+          text: selectedText.value,
+          pageNum: segment.page,
+          color: '#c9a84c',
+          note: '',
+          startOffset: segment.start,
+          endOffset: segment.end,
+        }).catch(() => {})
       }
     }
     for (const segment of added.sort((a, b) => b.start - a.start)) {
@@ -302,7 +313,11 @@ function highlightSelection() {
   window.getSelection()?.removeAllRanges()
 }
 
-onMounted(() => {
+onMounted(async () => {
+  try {
+    const stored = await paperStore.getHighlights(props.paperId)
+    highlightSegments.push(...stored.map((h: any) => ({ page: h.pageNum, start: h.startOffset, end: h.endOffset })))
+  } catch { /* highlights unavailable */ }
   renderPdf()
   scrollRef.value?.addEventListener('scroll', onScroll)
   containerRef.value?.addEventListener('mouseup', onMouseUp)
