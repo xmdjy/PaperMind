@@ -94,8 +94,16 @@
         <p class="card-desc">所有论文与对话数据存储在本地，可随时导出备份。</p>
         <div class="action-row">
           <el-button @click="exportData">导出数据</el-button>
+          <el-button @click="triggerImport">导入数据</el-button>
           <el-button type="danger" plain @click="clearData">清空所有数据</el-button>
         </div>
+        <input
+          ref="importInput"
+          type="file"
+          accept="application/json,.json"
+          style="display:none"
+          @change="onImportFile"
+        />
       </section>
 
       <!-- ── 关于 ── -->
@@ -121,7 +129,7 @@
         </el-form-item>
 
         <el-form-item label="模型提供商">
-          <el-select v-model="form.provider" style="width:100%">
+          <el-select v-model="form.provider" style="width:100%" @change="onProviderChange">
             <el-option label="OpenAI" value="openai" />
             <el-option label="Anthropic" value="anthropic" />
             <el-option label="Ollama (本地)" value="ollama" />
@@ -207,6 +215,12 @@ const abstractTokenLocal = ref(abstractToken.value)
 const dialogVisible = ref(false)
 const editingId = ref<string | null>(null)
 
+const PROVIDER_BASE_URLS: Record<string, string> = {
+  openai: 'https://api.openai.com/v1',
+  anthropic: 'https://api.anthropic.com',
+  ollama: 'http://localhost:11434',
+}
+
 const EMPTY_FORM = (): Omit<LLMProfile, 'id'> => ({
   name: '',
   provider: 'openai',
@@ -258,6 +272,13 @@ async function saveAbstractToken() {
   ElMessage.success('Hugging Face Token 已保存')
 }
 
+function onProviderChange() {
+  const known = new Set(Object.values(PROVIDER_BASE_URLS))
+  if (!form.baseUrl || known.has(form.baseUrl)) {
+    form.baseUrl = PROVIDER_BASE_URLS[form.provider] ?? ''
+  }
+}
+
 // ── Data management ──
 async function exportData() {
   const data = await window.db.data.export()
@@ -267,6 +288,27 @@ async function exportData() {
   a.download = `papermind-backup-${Date.now()}.json`
   a.click()
   ElMessage.success('已导出')
+}
+
+const importInput = ref<HTMLInputElement>()
+
+function triggerImport() { importInput.value?.click() }
+
+async function onImportFile(e: Event) {
+  const input = e.target as HTMLInputElement
+  const file = input.files?.[0]
+  if (!file) return
+  try {
+    const text = await file.text()
+    const data = JSON.parse(text)
+    await window.db.data.import(data)
+    ElMessage.success('已导入，正在刷新…')
+    setTimeout(() => location.reload(), 800)
+  } catch (err) {
+    ElMessage.error(`导入失败：${err instanceof Error ? err.message : '未知错误'}`)
+  } finally {
+    input.value = ''
+  }
 }
 
 async function clearData() {
