@@ -95,9 +95,23 @@ async function summarizeRange(
   return { title, nodeId, startPage: start, endPage: end, summary, nodes: [] }
 }
 
-export async function buildPageIndex(pages: string[], llm: LLMFn): Promise<IndexNode> {
+export interface IndexOptions {
+  /** 固定切块时每块页数，默认 5 */
+  chunkPages?: number
+  /** 语义分块后合并小节的最小页数，默认 2 */
+  minSectionPages?: number
+  /** 强制使用固定切块，跳过语义分块（消融对比用），默认 false */
+  forceFixedChunk?: boolean
+}
+
+export async function buildPageIndex(
+  pages: string[],
+  llm: LLMFn,
+  opts: IndexOptions = {},
+): Promise<IndexNode> {
+  const { chunkPages = CHUNK, minSectionPages = 2, forceFixedChunk = false } = opts
   // 语义分块：识别节边界；边界不足2个时降级为固定切块
-  const boundaries = detectSectionBoundaries(pages)
+  const boundaries = forceFixedChunk ? [] : detectSectionBoundaries(pages)
   let ranges: Array<{ start: number; end: number }>
 
   if (boundaries.length >= 2) {
@@ -109,12 +123,12 @@ export async function buildPageIndex(pages: string[], llm: LLMFn): Promise<Index
     if (boundaries[0] > 0) {
       ranges.unshift({ start: 0, end: boundaries[0] - 1 })
     }
-    ranges = mergeSmallSections(ranges)
+    ranges = mergeSmallSections(ranges, minSectionPages)
   } else {
-    // 降级：固定5页切块（原有行为）
+    // 降级：固定切块（原有行为）
     ranges = []
-    for (let i = 0; i < pages.length; i += CHUNK) {
-      ranges.push({ start: i, end: Math.min(i + CHUNK - 1, pages.length - 1) })
+    for (let i = 0; i < pages.length; i += chunkPages) {
+      ranges.push({ start: i, end: Math.min(i + chunkPages - 1, pages.length - 1) })
     }
   }
 
@@ -160,6 +174,8 @@ export interface RetrievalResult {
   scores: NodeScore[]
   /** 是否走了降级路径（LLM 响应不可用，回退到第一个节点） */
   degraded: boolean
+  /** 本次检索是否实际发出了 LLM 打分请求（单叶节点短路时为 false） */
+  llmCalled: boolean
 }
 
 function formatSource(n: IndexNode): string {
@@ -187,6 +203,7 @@ export async function scoreAndSelect(
       selected: [leaf],
       scores: [],
       degraded: false,
+      llmCalled: false,
     }
   }
 
@@ -219,5 +236,5 @@ export async function scoreAndSelect(
     .map(n => pages.slice(n.startPage, n.endPage + 1).join('\n\n'))
     .join('\n\n---\n\n')
 
-  return { context, sources: selected.map(formatSource), selected, scores, degraded }
+  return { context, sources: selected.map(formatSource), selected, scores, degraded, llmCalled: true }
 }

@@ -1,7 +1,7 @@
 import { defineStore } from 'pinia'
 import { ref, computed } from 'vue'
-import { extractPages, buildPageIndex, scoreAndSelect } from '../utils/pageIndex'
-import { rewriteQuery } from '../utils/queryRewrite'
+import { extractPages, buildPageIndex } from '../utils/pageIndex'
+import { runRagPipeline, type IndexedPaper } from '../utils/ragPipeline'
 import {
   ABSTRACT_MODEL,
   summarizeAcademicText,
@@ -48,8 +48,6 @@ const DEFAULT_PROFILE: LLMProfile = {
   topK: 0,
   systemPrompt: '你是一个专业的学术论文阅读助手，帮助用户理解和分析论文内容。',
 }
-
-const MATH_FORMAT_INSTRUCTION = '数学公式请使用 LaTeX：行内公式使用 $...$，独立公式使用 $$...$$。不要使用 \\(...\\) 或 \\[...\\] 包裹公式。'
 
 async function readErrorBody(res: Response): Promise<string> {
   try {
@@ -356,17 +354,9 @@ export const useChatStore = defineStore('chat', () => {
       return result.content
     }
 
-    let ragSources: string[] = []
+    // 收集已建索引的论文（缺失时兜底即时构建）
+    const papers: IndexedPaper[] = []
     if (!context && conv.paperIds.length > 0) {
-      const parts: string[] = []
-      const llmFn = (prompt: string) => callLLM([{ role: 'user', content: prompt }])
-
-      // Call 1（条件）：查询改写 — 取当前消息之前的最近3条历史
-      const historyBeforeCurrent = conv.messages.slice(-4, -1)
-      const retrievalQuery = historyBeforeCurrent.length >= 2
-        ? await rewriteQuery(userMessage, historyBeforeCurrent, llmFn)
-        : userMessage
-
       for (const paperId of conv.paperIds) {
         let stored = await window.db.index.get(paperId)
         // 兜底：导入时后台预处理未完成（LLM未配置等），首次对话时按需构建
@@ -377,30 +367,25 @@ export const useChatStore = defineStore('chat', () => {
           } catch { /* ignore — no index available for this paper */ }
         }
         if (!stored) continue
-        const tree = JSON.parse(stored.indexJson)
-        const pages = JSON.parse(stored.pagesJson)
-        // Call 2：评分多选
-        const { context: ctx, sources } = await scoreAndSelect(tree, pages, retrievalQuery, llmFn)
-        parts.push(ctx)
-        ragSources.push(...sources)
+        papers.push({ tree: JSON.parse(stored.indexJson), pages: JSON.parse(stored.pagesJson) })
       }
-      if (parts.length > 0) context = parts.join('\n\n---\n\n')
     }
 
-    const profile = chatProfile.value
-    const messages = [
-      {
-        role: 'system',
-        content: `${profile.systemPrompt}\n\n${MATH_FORMAT_INSTRUCTION}` +
-          (context ? `\n\n参考内容：\n${context}` : ''),
-      },
-      ...conv.messages.slice(-20).map(m => ({ role: m.role, content: m.content })),
-    ]
+    // 历史不含刚追加的当前提问
+    const history = conv.messages.slice(0, -1).map(m => ({ role: m.role, content: m.content }))
 
-    // Call 3: generate answer
-    const reply = await callLLM(messages)
-    await addMessage(convId, 'assistant', reply, ragSources.length ? ragSources : undefined)
-    return reply
+    const { answer, sources } = await runRagPipeline(
+      papers,
+      userMessage,
+      history,
+      (prompt: string) => callLLM([{ role: 'user', content: prompt }]),
+      callLLM,
+      chatProfile.value.systemPrompt,
+      { externalContext: context },
+    )
+
+    await addMessage(convId, 'assistant', answer, sources.length ? sources : undefined)
+    return answer
   }
 
   return {
