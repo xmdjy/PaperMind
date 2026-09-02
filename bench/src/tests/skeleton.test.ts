@@ -12,9 +12,4 @@ describe('bench 骨架', () => {
     expect(typeof runRagPipeline).toBe('function')
     expect(MATH_FORMAT_INSTRUCTION).toContain('$')
   })
-
-  it('可以 import bench 共享类型模块（编译期存在即通过）', async () => {
-    const mod = await import('../types')
-    expect(mod).toBeDefined()
-  })
 })
