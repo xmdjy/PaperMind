@@ -31,3 +31,9 @@ Thumbs.db
 # Tooling caches
 .codegraph/
 .cursor/
+
+# Benchmark 产物
+bench/cache/
+bench/results/
+bench/datasets/qasper/qasper.jsonl
+bench/datasets/smoke/papers/
