@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
-import { mkdtempSync, rmSync, readdirSync } from 'node:fs'
+import { mkdtempSync, rmSync, readdirSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { createLlmClient, resolveEnvConfig } from '../llmClient'
@@ -11,12 +11,20 @@ beforeEach(() => {
 })
 afterEach(() => {
   rmSync(cacheDir, { recursive: true, force: true })
+  vi.unstubAllEnvs()
 })
 
 function okResponse(content: string): Response {
   return {
     ok: true,
     json: async () => ({ choices: [{ message: { content } }] }),
+  } as unknown as Response
+}
+
+function ollamaResponse(content: string): Response {
+  return {
+    ok: true,
+    json: async () => ({ message: { content } }),
   } as unknown as Response
 }
 
@@ -117,5 +125,107 @@ describe('createLlmClient 缓存', () => {
     await client.complete('a') // 命中缓存，不计入延迟
 
     expect(client.latencies()).toHaveLength(1)
+  })
+
+  it('HTTP 200 但 choices[0].message.content 缺失时抛错且不写缓存', async () => {
+    const fetchImpl = vi.fn().mockResolvedValue({
+      ok: true, json: async () => ({ error: { message: 'content_filter' } }),
+    } as unknown as Response)
+    const client = createLlmClient({
+      provider: 'openai', model: 'm', apiKey: 'k', baseUrl: 'http://x/v1',
+      cacheDir, fetchImpl: fetchImpl as unknown as typeof fetch,
+    })
+
+    await expect(client.complete('hello')).rejects.toThrow(/缺少 content/)
+    expect(readdirSync(cacheDir)).toHaveLength(0)
+  })
+
+  it('ollama 分支 200 但 message.content 缺失时抛错且不写缓存', async () => {
+    const fetchImpl = vi.fn().mockResolvedValue({
+      ok: true, json: async () => ({ message: { content: '   ' } }),
+    } as unknown as Response)
+    const client = createLlmClient({
+      provider: 'ollama', model: 'llama3', apiKey: '', baseUrl: 'http://localhost:11434',
+      cacheDir, fetchImpl: fetchImpl as unknown as typeof fetch,
+    })
+
+    await expect(client.complete('hello')).rejects.toThrow(/缺少 content/)
+    expect(readdirSync(cacheDir)).toHaveLength(0)
+  })
+
+  it('opts 只覆盖部分字段时逐字段合并，不整体回落到环境变量', async () => {
+    vi.stubEnv('BENCH_LLM_PROVIDER', 'openai')
+    vi.stubEnv('BENCH_LLM_MODEL', 'env-model')
+    vi.stubEnv('BENCH_LLM_BASE_URL', 'https://env.example.com/v1')
+    const fetchImpl = vi.fn().mockResolvedValue(ollamaResponse('ok'))
+
+    // 只给 provider / baseUrl，不给 model：model 取环境变量，端点必须用 opts 的
+    const client = createLlmClient({
+      provider: 'ollama', baseUrl: 'http://localhost:9999',
+      cacheDir, fetchImpl: fetchImpl as unknown as typeof fetch,
+    })
+
+    expect(await client.complete('hello')).toBe('ok')
+    expect(fetchImpl.mock.calls[0][0]).toBe('http://localhost:9999/api/chat')
+    expect(JSON.parse(fetchImpl.mock.calls[0][1].body).model).toBe('env-model')
+  })
+
+  it('同名 model 跨 provider / 跨 baseUrl 不共享缓存', async () => {
+    const openaiFetch = vi.fn().mockResolvedValue(okResponse('from-openai'))
+    const ollamaFetch = vi.fn().mockResolvedValue(ollamaResponse('from-ollama'))
+    const otherBaseFetch = vi.fn().mockResolvedValue(okResponse('from-other-base'))
+
+    await createLlmClient({
+      provider: 'openai', model: 'llama3', apiKey: 'k', baseUrl: 'http://x/v1',
+      cacheDir, fetchImpl: openaiFetch as unknown as typeof fetch,
+    }).complete('hello')
+
+    // 同名 model、不同 provider：必须真的发请求
+    await createLlmClient({
+      provider: 'ollama', model: 'llama3', apiKey: '', baseUrl: 'http://localhost:11434',
+      cacheDir, fetchImpl: ollamaFetch as unknown as typeof fetch,
+    }).complete('hello')
+
+    // 同名 model、同 provider、不同 baseUrl：同样不能共享
+    await createLlmClient({
+      provider: 'openai', model: 'llama3', apiKey: 'k', baseUrl: 'http://y/v1',
+      cacheDir, fetchImpl: otherBaseFetch as unknown as typeof fetch,
+    }).complete('hello')
+
+    expect(ollamaFetch).toHaveBeenCalledTimes(1)
+    expect(otherBaseFetch).toHaveBeenCalledTimes(1)
+    expect(readdirSync(cacheDir)).toHaveLength(3)
+  })
+
+  it('缓存文件损坏时当作 miss 重新请求，不抛错', async () => {
+    const fetchImpl = vi.fn().mockResolvedValue(okResponse('answer'))
+    const opts = {
+      provider: 'openai', model: 'm', apiKey: 'k', baseUrl: 'http://x/v1',
+      cacheDir, fetchImpl: fetchImpl as unknown as typeof fetch,
+    }
+
+    await createLlmClient(opts).complete('hello')
+    const [cacheFile] = readdirSync(cacheDir)
+    writeFileSync(join(cacheDir, cacheFile), '{"content": "half-writ')
+
+    expect(await createLlmClient(opts).complete('hello')).toBe('answer')
+    expect(fetchImpl).toHaveBeenCalledTimes(2)
+    // 坏文件被原子写覆盖，实现自愈
+    expect(readdirSync(cacheDir)).toHaveLength(1)
+  })
+
+  it('anthropic 分支带 x-api-key 与 anthropic-version 请求头', async () => {
+    const fetchImpl = vi.fn().mockResolvedValue(okResponse('answer'))
+    const client = createLlmClient({
+      provider: 'anthropic', model: 'claude', apiKey: 'sk-ant', baseUrl: 'http://x/v1',
+      cacheDir, fetchImpl: fetchImpl as unknown as typeof fetch,
+    })
+
+    await client.complete('hello')
+
+    const headers = fetchImpl.mock.calls[0][1].headers
+    expect(headers['x-api-key']).toBe('sk-ant')
+    expect(headers['anthropic-version']).toBe('2023-06-01')
+    expect(headers['Authorization']).toBeUndefined()
   })
 })

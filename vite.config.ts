@@ -23,9 +23,7 @@ export default defineConfig({
   },
   plugins: [
     vue(),
-    // Vitest 下跳过 electron 插件：renderer() 会把 node:fs 等内建模块重写为 CJS shim，
-    // 与 bench/ 的 ESM 测试（直接使用 node:fs / node:crypto）冲突。
-    ...(process.env.VITEST ? [] : [electron([
+    electron([
       {
         entry: 'electron/main.ts',
         onstart(options) {
@@ -52,7 +50,11 @@ export default defineConfig({
           },
         },
       },
-    ]), renderer()]),
+    ]),
+    // Vitest 下跳过 renderer()：它会把 node:fs 等内建模块重写为 CJS shim
+    // （.vite-electron-renderer/fs.mjs 里含 require），与 bench/ 的 ESM 测试
+    // （直接使用 node:fs / node:crypto）冲突，会报 require is not defined。
+    ...(process.env.VITEST ? [] : [renderer()]),
   ],
   resolve: {
     alias: {
