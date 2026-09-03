@@ -1,5 +1,5 @@
 import { createHash } from 'node:crypto'
-import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs'
+import { mkdirSync, readFileSync, renameSync, unlinkSync, writeFileSync } from 'node:fs'
 import { join, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import type { ChatLLMFn, ChatMessage, LLMFn } from '../../src/utils/llm'
@@ -39,18 +39,12 @@ function defaultBaseUrl(provider: string): string {
   return provider === 'ollama' ? 'http://localhost:11434' : 'https://api.openai.com/v1'
 }
 
+/**
+ * 纯环境变量配置（不掺入显式 opts），供外部脚本预检配置用。
+ * 对外签名与「缺 model 抛错」的行为是稳定契约，改动需同步现有用例。
+ */
 export function resolveEnvConfig(env: Record<string, string | undefined>) {
-  const model = env.BENCH_LLM_MODEL
-  if (!model) {
-    throw new Error('缺少环境变量 BENCH_LLM_MODEL（例：export BENCH_LLM_MODEL=gpt-4o）')
-  }
-  const provider = env.BENCH_LLM_PROVIDER ?? 'openai'
-  return {
-    provider,
-    model,
-    apiKey: env.BENCH_LLM_API_KEY ?? '',
-    baseUrl: env.BENCH_LLM_BASE_URL ?? defaultBaseUrl(provider),
-  }
+  return mergeConfig({}, readEnvPartial(env))
 }
 
 // key 必须包含 provider 与 baseUrl：同名模型（如 llama3）在不同端点上是不同的被测对象，
@@ -89,7 +83,7 @@ function requireContent(content: unknown, data: unknown): string {
 }
 
 export function createLlmClient(opts: LlmClientOptions = {}): LlmClient {
-  const env = resolveEnvConfigSafe(opts)
+  const env = mergeConfig(opts, readEnvPartial(process.env))
   const cacheDir = opts.cacheDir ?? defaultCacheDir()
   const useCache = opts.useCache !== false
   const doFetch = opts.fetchImpl ?? fetch
@@ -104,9 +98,11 @@ export function createLlmClient(opts: LlmClientOptions = {}): LlmClient {
     const key = cacheKey(env.provider, env.baseUrl, env.model, messages)
     const cachePath = join(cacheDir, `${key}.json`)
 
-    if (useCache && existsSync(cachePath)) {
+    if (useCache) {
       // 缓存文件可能被中断的写入或外部改动损坏；读失败一律当 miss 处理，
       // 后续的原子写入会覆盖掉坏文件，实现自愈，不让单样本失败中断整轮评测。
+      // 不先 existsSync：readCache 的 try/catch 已经吞掉 ENOENT，多一次 syscall
+      // 只会引入无意义的 TOCTOU 窗口。
       const cached = readCache(cachePath)
       if (cached !== null) {
         hits++
@@ -119,9 +115,16 @@ export function createLlmClient(opts: LlmClientOptions = {}): LlmClient {
     const content = await request(messages)
     latencyList.push(Date.now() - started)
 
-    // 只缓存成功响应；失败会在 request 内抛出，走不到这里
+    // 只缓存成功响应；失败会在 request 内抛出，走不到这里。
+    // 载荷与 cacheKey 同构（带上 provider / baseUrl），否则拿到一个缓存文件无法反查它属于哪个端点。
     if (useCache) {
-      writeCacheAtomic(cachePath, { model: env.model, messages, content })
+      writeCacheAtomic(cachePath, {
+        provider: env.provider,
+        baseUrl: env.baseUrl,
+        model: env.model,
+        messages,
+        content,
+      })
     }
     return content
   }
@@ -178,27 +181,53 @@ function readCache(cachePath: string): string | null {
 /**
  * 原子写：先写同目录临时文件再 rename（同文件系统内 rename 原子），
  * 避免 Ctrl-C 打断或并发写留下半截 JSON 文件。
+ * 仍有一个残留窗口：写完 tmp、rename 之前进程被杀，`.tmp.<pid>` 会留在缓存目录
+ * （内容完整但不会被读到，只占磁盘）；异常路径下这里会主动清理。
+ * 写盘失败一律吞掉：缓存只是加速手段，不能让一次已付费且成功的 LLM 响应变成 reject。
  */
 function writeCacheAtomic(cachePath: string, payload: unknown): void {
   const tmpPath = `${cachePath}.tmp.${process.pid}`
-  writeFileSync(tmpPath, JSON.stringify(payload, null, 2))
-  renameSync(tmpPath, cachePath)
+  try {
+    writeFileSync(tmpPath, JSON.stringify(payload, null, 2))
+    renameSync(tmpPath, cachePath)
+  } catch (err) {
+    try {
+      unlinkSync(tmpPath)
+    } catch {
+      // tmp 可能压根没写成功，清理失败无需再处理
+    }
+    console.warn(`[bench] 缓存写入失败（不影响本次结果）：${cachePath}`, err)
+  }
+}
+
+/** 环境变量里的配置片段；缺失字段保持 undefined，交由 mergeConfig 决定回落。 */
+function readEnvPartial(env: Record<string, string | undefined>) {
+  return {
+    provider: env.BENCH_LLM_PROVIDER,
+    model: env.BENCH_LLM_MODEL,
+    apiKey: env.BENCH_LLM_API_KEY,
+    baseUrl: env.BENCH_LLM_BASE_URL,
+  }
 }
 
 /**
- * 逐字段合并 opts 与环境变量配置：opts 中任一字段都能单独覆盖，
- * 未给出的字段才回落到环境变量 / provider 默认值。
- * 只有完全没给 model 时才读环境变量（此时缺 BENCH_LLM_MODEL 仍会抛错）。
+ * 逐字段合并显式配置与环境变量：opts 的每个字段各自独立覆盖，未给出的字段
+ * 分别回落到对应环境变量 / provider 默认值——两个方向都不做「全有或全无」。
+ * 这对 judge 客户端是必需的：`createLlmClient({ model: BENCH_JUDGE_MODEL })`
+ * 只想换模型，凭据与端点必须继续沿用 BENCH_LLM_API_KEY / BENCH_LLM_BASE_URL。
+ * model 用 `||` 而非 `??`：空串视同未提供，就地抛出可诊断错误，
+ * 而不是把配置错误顺出去变成远端 400。
  */
-function resolveEnvConfigSafe(opts: LlmClientOptions) {
-  const base = opts.model
-    ? { provider: undefined, model: opts.model, apiKey: undefined, baseUrl: undefined }
-    : resolveEnvConfig(process.env)
-  const provider = opts.provider ?? base.provider ?? 'openai'
+function mergeConfig(opts: LlmClientOptions, env: ReturnType<typeof readEnvPartial>) {
+  const model = opts.model || env.model
+  if (!model) {
+    throw new Error('缺少环境变量 BENCH_LLM_MODEL（例：export BENCH_LLM_MODEL=gpt-4o）')
+  }
+  const provider = opts.provider ?? env.provider ?? 'openai'
   return {
     provider,
-    model: opts.model ?? base.model,
-    apiKey: opts.apiKey ?? base.apiKey ?? '',
-    baseUrl: opts.baseUrl ?? base.baseUrl ?? defaultBaseUrl(provider),
+    model,
+    apiKey: opts.apiKey ?? env.apiKey ?? '',
+    baseUrl: opts.baseUrl ?? env.baseUrl ?? defaultBaseUrl(provider),
   }
 }

@@ -64,7 +64,7 @@
 **Interfaces:**
 - Consumes: 无（首个 Task）
 - Produces: `bench/src/types.ts` 的全部类型，后续所有 Task 都从这里 import：
-  - `EvalSample`、`QaQuestion`、`SummarySample`
+  - `EvalSample`、`QaQuestion`、`SampleSource`、`SampleStage`
   - `BenchConfig`、`ConfigFile`
   - `SampleError`、`BenchResult`、`PerSampleRecord`
 
@@ -115,6 +115,9 @@ bench/datasets/smoke/papers/
 import type { IndexOptions } from '../../src/utils/pageIndex'
 import type { RagOptions } from '../../src/utils/ragPipeline'
 
+/** 数据来源，用于报表中分开统计语义分块指标 */
+export type SampleSource = 'qasper' | 'smoke'
+
 /** 单个问答样本。evidencePages 为 0-based inclusive 页号。 */
 export interface QaQuestion {
   id: string
@@ -134,25 +137,31 @@ export interface EvalSample {
   questions: QaQuestion[]
   /** 参考摘要；QASPER 样本可能没有，为 undefined 时跳过摘要任务 */
   referenceAbstract?: string
-  /** 数据来源，用于报表中分开统计语义分块指标 */
-  source: 'qasper' | 'smoke'
+  source: SampleSource
 }
 
-/** 一组具体参数取值（矩阵展开后的单点）。 */
-export interface BenchConfig extends IndexOptions, RagOptions {
+/**
+ * 一组具体参数取值（矩阵展开后的单点）。
+ * 刻意 Omit externalContext：它会让 runRagPipeline 跳过改写与检索，
+ * 一个语法合法的配置就能静默关掉正在被评测的整条链路，而指标照常输出数字。
+ */
+export interface BenchConfig extends IndexOptions, Omit<RagOptions, 'externalContext'> {
   name: string
 }
 
 /** 配置文件形态：matrix 各字段取值数组，展开为笛卡尔积。 */
 export interface ConfigFile {
   name: string
-  matrix: Record<string, Array<number | boolean>>
+  /** 键收敛到 BenchConfig 的可调字段，防止拼错的键静默失效 */
+  matrix: Partial<Record<Exclude<keyof BenchConfig, 'name'>, Array<number | boolean>>>
 }
+
+/** 失败阶段，用于区分「网络问题」与「代码问题」 */
+export type SampleStage = 'load' | 'index' | 'retrieve' | 'generate' | 'summarize' | 'judge'
 
 export interface SampleError {
   sampleId: string
-  /** 失败阶段，用于区分「网络问题」与「代码问题」 */
-  stage: 'load' | 'index' | 'retrieve' | 'generate' | 'summarize' | 'judge'
+  stage: SampleStage
   message: string
 }
 
@@ -160,7 +169,7 @@ export interface SampleError {
 export interface PerSampleRecord {
   id: string
   paperId: string
-  source: 'qasper' | 'smoke'
+  source: SampleSource
   metrics: Record<string, number>
   /** QA 专有 */
   retrievalQuery?: string
@@ -211,13 +220,10 @@ describe('bench 骨架', () => {
     expect(typeof runRagPipeline).toBe('function')
     expect(MATH_FORMAT_INSTRUCTION).toContain('$')
   })
-
-  it('可以 import bench 共享类型模块（编译期存在即通过）', async () => {
-    const mod = await import('../types')
-    expect(mod).toBeDefined()
-  })
 })
 ```
+
+> `types.ts` 是纯类型模块，转译后为空模块，对它写 `expect(mod).toBeDefined()` 是恒真断言，没有价值。它的正确性由 `npm run typecheck` 覆盖（前提是 `tsconfig.json` 的 `include` 含 `bench/**/*`，见 Step 6）。
 
 - [ ] **Step 6: 跑测试确认通过**
 

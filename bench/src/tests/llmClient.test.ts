@@ -170,6 +170,24 @@ describe('createLlmClient 缓存', () => {
     expect(JSON.parse(fetchImpl.mock.calls[0][1].body).model).toBe('env-model')
   })
 
+  it('只给 model 时 apiKey / baseUrl 仍回落到环境变量', async () => {
+    // 对应 judge 客户端的真实写法 createLlmClient({ model: process.env.BENCH_JUDGE_MODEL })：
+    // 只覆盖 model，凭据与端点必须继续来自 BENCH_LLM_*，否则会打到 api.openai.com 并 401
+    vi.stubEnv('BENCH_LLM_PROVIDER', undefined)
+    vi.stubEnv('BENCH_LLM_API_KEY', 'sk-env')
+    vi.stubEnv('BENCH_LLM_BASE_URL', 'https://env.example.com/v1')
+    const fetchImpl = vi.fn().mockResolvedValue(okResponse('ok'))
+
+    const client = createLlmClient({
+      model: 'gpt-4o',
+      cacheDir, fetchImpl: fetchImpl as unknown as typeof fetch,
+    })
+
+    expect(await client.complete('hello')).toBe('ok')
+    expect(fetchImpl.mock.calls[0][0]).toBe('https://env.example.com/v1/chat/completions')
+    expect(fetchImpl.mock.calls[0][1].headers['Authorization']).toBe('Bearer sk-env')
+  })
+
   it('同名 model 跨 provider / 跨 baseUrl 不共享缓存', async () => {
     const openaiFetch = vi.fn().mockResolvedValue(okResponse('from-openai'))
     const ollamaFetch = vi.fn().mockResolvedValue(ollamaResponse('from-ollama'))
