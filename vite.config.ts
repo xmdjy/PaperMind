@@ -23,7 +23,9 @@ export default defineConfig({
   },
   plugins: [
     vue(),
-    electron([
+    // Vitest 下跳过 electron 插件：renderer() 会把 node:fs 等内建模块重写为 CJS shim，
+    // 与 bench/ 的 ESM 测试（直接使用 node:fs / node:crypto）冲突。
+    ...(process.env.VITEST ? [] : [electron([
       {
         entry: 'electron/main.ts',
         onstart(options) {
@@ -50,8 +52,7 @@ export default defineConfig({
           },
         },
       },
-    ]),
-    renderer(),
+    ]), renderer()]),
   ],
   resolve: {
     alias: {
