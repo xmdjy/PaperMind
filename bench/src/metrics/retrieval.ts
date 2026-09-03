@@ -42,7 +42,9 @@ export function computeRetrievalMetrics(args: RetrievalMetricArgs): RetrievalMet
   const evidenceSet = new Set(evidencePages)
   const covered = selectedPages.filter(p => evidenceSet.has(p))
 
-  const evidenceRecall = evidencePages.length > 0 ? covered.length / evidencePages.length : 0
+  // 分母用去重后的页数：分子 covered 来自去重的 selectedPages，
+  // evidencePages 里重复的页号（多个 evidence 段落落进同一伪页）不该把 recall 拉低到 1 以下
+  const evidenceRecall = evidenceSet.size > 0 ? covered.length / evidenceSet.size : 0
   const contextPrecision = selectedPages.length > 0 ? covered.length / selectedPages.length : 0
 
   return {
