@@ -73,4 +73,18 @@ describe('loadSmokeDataset', () => {
     ]))
     await expect(loadSmokeDataset(dir, { extract })).rejects.toThrow(/99/)
   })
+
+  it('1-based 页码为 0 或负数时抛错（标注笔误）', async () => {
+    writeFileSync(join(dir, 'annotations.json'), JSON.stringify([
+      { file: 'a.pdf', questions: [{ q: 'x', answer: 'y', evidencePages: [0, -1] }] },
+    ]))
+    await expect(loadSmokeDataset(dir, { extract })).rejects.toThrow(/越界/)
+  })
+
+  it('拒绝含路径分隔符的 file 字段', async () => {
+    writeFileSync(join(dir, 'annotations.json'), JSON.stringify([
+      { file: '../escape.pdf', questions: [] },
+    ]))
+    await expect(loadSmokeDataset(dir, { extract })).rejects.toThrow(/路径分隔符/)
+  })
 })

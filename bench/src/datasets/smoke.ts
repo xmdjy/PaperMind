@@ -3,8 +3,10 @@ import { existsSync } from 'node:fs'
 import { join } from 'node:path'
 import { extractPages } from '../../../src/utils/pageIndex'
 import type { EvalSample, QaQuestion } from '../types'
+import { benchPath } from '../paths'
 
-const DEFAULT_DIR = new URL('../../datasets/smoke/', import.meta.url).pathname
+// 惰性求值：不能用 new URL(...).pathname（百分号转义 / Vitest 改写缺陷），用共享 benchPath。
+const DEFAULT_DIR = () => benchPath(import.meta.url, '../../datasets/smoke/')
 
 export interface SmokeAnnotation {
   file: string
@@ -19,7 +21,7 @@ export interface SmokeDeps {
 }
 
 export async function loadSmokeDataset(
-  dir: string = DEFAULT_DIR,
+  dir: string = DEFAULT_DIR(),
   deps: SmokeDeps = {},
 ): Promise<EvalSample[]> {
   const extract = deps.extract ?? extractPages
@@ -35,6 +37,10 @@ export async function loadSmokeDataset(
 
   const samples: EvalSample[] = []
   for (const ann of annotations) {
+    // file 字段必须只写文件名：含路径分隔符或 .. 会越过 papers/ 目录读到目录外文件
+    if (ann.file.includes('/') || ann.file.includes('\\') || ann.file.includes('..')) {
+      throw new Error(`标注的 file 字段含路径分隔符：${ann.file}（应只写文件名）`)
+    }
     const pdfPath = join(dir, 'papers', ann.file)
     if (!existsSync(pdfPath)) {
       throw new Error(`标注引用的 PDF 不存在：${ann.file}（期望位于 ${join(dir, 'papers')}）`)

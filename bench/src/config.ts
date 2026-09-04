@@ -2,8 +2,11 @@ import { readFile } from 'node:fs/promises'
 import { existsSync } from 'node:fs'
 import { isAbsolute, join } from 'node:path'
 import type { BenchConfig, ConfigFile } from './types'
+import { benchPath } from './paths'
 
-const DEFAULT_CONFIG_DIR = new URL('../configs/', import.meta.url).pathname
+// 惰性求值：不能用 new URL(...).pathname，其保留百分号转义且 Vitest 下会被改写，
+// 用共享的 benchPath 在每次调用时解析（默认参数每次调用求值）。
+const DEFAULT_CONFIG_DIR = () => benchPath(import.meta.url, '../configs/')
 
 /** 矩阵字段取值展开为笛卡尔积，每个组合一个 BenchConfig。 */
 export function expandMatrix(file: ConfigFile): BenchConfig[] {
@@ -31,7 +34,7 @@ function describeCombo(combo: Record<string, number | boolean>): string {
 
 export async function loadConfigs(
   nameOrPath: string,
-  configDir: string = DEFAULT_CONFIG_DIR,
+  configDir: string = DEFAULT_CONFIG_DIR(),
 ): Promise<BenchConfig[]> {
   const path = nameOrPath.endsWith('.json') || isAbsolute(nameOrPath)
     ? nameOrPath
@@ -44,7 +47,7 @@ export async function loadConfigs(
   return expandMatrix(file)
 }
 
-/** 报表行标签与结果文件名用；剔除文件名非法字符。 */
+/** 报表行标签与结果文件名用；剔除文件名非法字符（Windows 不允许文件名以点结尾）。 */
 export function configLabel(config: BenchConfig): string {
-  return config.name.replace(/[^\w.=,[\]-]/g, '_').replace(/[[\],=]/g, '.')
+  return config.name.replace(/[^\w.=,[\]-]/g, '_').replace(/[[\],=]/g, '.').replace(/\.+$/, '')
 }

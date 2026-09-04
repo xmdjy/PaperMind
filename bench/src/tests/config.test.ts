@@ -57,6 +57,19 @@ describe('loadConfigs', () => {
   it('文件不存在时抛出带路径的错误', async () => {
     await expect(loadConfigs('nope', dir)).rejects.toThrow(/nope/)
   })
+
+  it('默认配置目录能加载内置 default 配置（防路径解析静默失效）', async () => {
+    const out = await loadConfigs('default')
+    expect(out).toHaveLength(1)
+    expect(out[0].name).toBe('default')
+  })
+
+  it('绝对路径但不以 .json 结尾时按原路径直接加载', async () => {
+    // 无扩展名的绝对路径：实现按原路径使用（只要文件存在即可加载）
+    writeFileSync(join(dir, 'noext'), JSON.stringify({ name: 'bare', matrix: {} }))
+    const out = await loadConfigs(join(dir, 'noext'), dir)
+    expect(out).toEqual([{ name: 'bare' }])
+  })
 })
 
 describe('configLabel', () => {
@@ -64,5 +77,12 @@ describe('configLabel', () => {
     const label = configLabel({ name: 'ab', topK: 2, minScore: 4 })
     expect(label).toMatch(/^[\w.-]+$/)
     expect(label).toContain('ab')
+  })
+
+  it('剔除括号与逗号且不以点结尾', () => {
+    const label = configLabel({ name: 'ab[topK=2,minScore=4]', topK: 2, minScore: 4 })
+    expect(label).toMatch(/^[\w.-]+$/)
+    expect(label).not.toMatch(/\.$/)
+    expect(label).toContain('topK')
   })
 })
