@@ -15,6 +15,8 @@ export interface QaQuestion {
   answers: string[]
   evidencePages: number[]
   unanswerable: boolean
+  /** QASPER free-text evidence may not map uniquely to a source paragraph. */
+  evidenceMapping?: 'mapped' | 'ambiguous' | 'unmapped'
 }
 
 /** 一篇论文及其挂载的问答/摘要标注。 */
@@ -82,6 +84,9 @@ export interface BenchResult {
     unanswerableMethod?: 'pattern' | 'judge'
     /** 缓存模式：normal 读写缓存；bypass（--no-cache）只跳过读，不覆写已有缓存文件 */
     cacheMode?: 'normal' | 'bypass'
+    evidenceMappingCoverage?: number
+    ambiguousEvidenceRate?: number
+    unmappedEvidenceRate?: number
   }
   metrics: Record<string, number>
   perSample: PerSampleRecord[]

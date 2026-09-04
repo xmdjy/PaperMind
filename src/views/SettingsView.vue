@@ -108,7 +108,7 @@
 
       <!-- ── 关于 ── -->
       <section class="settings-card about">
-        <div class="about-mark" aria-hidden="true">P</div>
+        <img class="about-mark" :src="paperMindIcon" alt="" />
         <div>
           <h3>关于</h3>
           <p class="card-desc">PaperMind · 本地论文阅读助手 · v0.1.0</p>
@@ -202,6 +202,8 @@ import { ElMessage, ElMessageBox } from 'element-plus'
 import { Plus } from '@element-plus/icons-vue'
 import { useChatStore, PROMPT_TEMPLATES, type LLMProfile } from '../stores/chat'
 import { storeToRefs } from 'pinia'
+
+const paperMindIcon = new URL('../../assets/papermind-icon.svg', import.meta.url).href
 
 const chatStore = useChatStore()
 const { profiles, chatProfileId, indexProfileId, abstractToken } = storeToRefs(chatStore)
@@ -426,16 +428,7 @@ async function clearData() {
 .about-mark {
   width: 40px;
   height: 40px;
-  border-radius: 11px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  font-family: 'Playfair Display', serif;
-  font-weight: 700;
-  font-size: 18px;
-  color: #0c0e11;
-  background: linear-gradient(145deg, var(--accent-hover), var(--accent));
-  box-shadow: 0 6px 16px rgba(61, 184, 160, 0.18);
+  display: block;
   flex-shrink: 0;
 }
 

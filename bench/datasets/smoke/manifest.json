@@ -1,4 +1,12 @@
 {
-  "note": "PDF 文件不纳入版本管理（体积与版权）。按下表自行下载至 papers/ 目录。",
+  "note": "semantic-headings.pdf 是随仓库提交的合成真实 PDF fixture；其他版权 PDF 不纳入版本管理。按下表下载其他论文至 papers/ 目录并核对 SHA-256。",
+  "fixtures": [
+    {
+      "file": "semantic-headings.pdf",
+      "source": "Repository-generated ReportLab PDF fixture",
+      "sha256": "9f1e0624abac9d2565648c863d22c58c478aa8326c289da1f0b0eab5252f2c52",
+      "purpose": "PDF.js extraction, mid-page headings, and repeated running-header regression coverage"
+    }
+  ],
   "papers": []
 }

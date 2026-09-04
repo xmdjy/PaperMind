@@ -1,5 +1,6 @@
 import type { BenchResult } from './types'
 import { REFUSAL_PATTERN_VERSION } from './metrics/answerF1'
+import { aggregate } from './metrics/aggregate'
 
 /** 各任务的主指标，用于在矩阵报表中标出最优行。 */
 export const PRIMARY_METRIC: Record<'qa' | 'summary', string> = {
@@ -46,6 +47,23 @@ export function renderReport(
   const lines: string[] = []
   lines.push(`## 评测报表：${first.task}`)
   lines.push('')
+
+  const sources = new Set(results.flatMap(result => result.perSample.map(record => record.source)))
+  if (sources.size > 0) {
+    lines.push('### 按数据来源')
+    lines.push('')
+    lines.push('| 配置 | 来源 | 完成 | evidenceRecall | evidenceHitRate |')
+    lines.push('| --- | --- | --- | --- | --- |')
+    for (const result of results) {
+      for (const source of sources) {
+        const records = result.perSample.filter(record => record.source === source)
+        if (records.length === 0) continue
+        const sourceMetrics = renameSourceRates(aggregate(records))
+        lines.push(`| ${result.config.name} | ${source === 'qasper' ? 'QASPER（标题注入伪页）' : 'smoke（真实 PDF）'} | ${records.length} | ${sourceMetrics.evidenceRecall === undefined ? '—' : fmt(sourceMetrics.evidenceRecall)} | ${sourceMetrics.evidenceHitRate === undefined ? '—' : fmt(sourceMetrics.evidenceHitRate)} |`)
+      }
+    }
+    lines.push('')
+  }
   lines.push(`- 模型：\`${first.meta.model}\``)
   if (first.meta.judgeModel) lines.push(`- Judge 模型：\`${first.meta.judgeModel}\``)
   lines.push(`- 代码版本：\`${first.meta.gitSha}\``)
@@ -57,6 +75,11 @@ export function renderReport(
     if (first.meta.unanswerableMethod === 'pattern') {
       lines.push(`- 拒答模式表版本：\`${REFUSAL_PATTERN_VERSION}\``)
     }
+  }
+  if (first.meta.evidenceMappingCoverage !== undefined) {
+    lines.push(`- Evidence 映射覆盖率：${fmt(first.meta.evidenceMappingCoverage)}`)
+    lines.push(`- Evidence 歧义率：${fmt(first.meta.ambiguousEvidenceRate ?? 0)}`)
+    lines.push(`- Evidence 未映射率：${fmt(first.meta.unmappedEvidenceRate ?? 0)}`)
   }
   lines.push('')
 
@@ -84,6 +107,13 @@ export function renderReport(
   }
 
   return lines.join('\n')
+}
+
+function renameSourceRates(metrics: Record<string, number>): Record<string, number> {
+  return {
+    ...metrics,
+    ...(metrics.evidenceHit !== undefined ? { evidenceHitRate: metrics.evidenceHit } : {}),
+  }
 }
 
 /** 失败样本按阶段聚合计数 + 一条示例信息（截断 80 字符），不逐条罗列。 */

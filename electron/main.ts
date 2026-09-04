@@ -1,7 +1,9 @@
-import { app, BrowserWindow, shell } from 'electron'
+import { app, BrowserWindow, nativeImage, shell } from 'electron'
 import { join } from 'path'
 import { initDb } from './db'
 import { registerIpc } from './ipc'
+
+app.setName('PaperMind')
 
 // Fix GPU crash on Linux (Intel GBM/Wayland ENOMEM)
 app.commandLine.appendSwitch('disable-gpu')
@@ -44,6 +46,11 @@ const createWindow = () => {
 }
 
 app.whenReady().then(() => {
+  if (process.platform === 'darwin' && process.env.VITE_DEV_SERVER_URL) {
+    const icon = nativeImage.createFromPath(join(process.cwd(), 'assets', 'papermind-icon.png'))
+    if (!icon.isEmpty()) app.dock?.setIcon(icon)
+  }
+
   initDb()
   registerIpc()
   createWindow()

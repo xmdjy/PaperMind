@@ -37,3 +37,5 @@ bench/cache/
 bench/results/
 bench/datasets/qasper/qasper.jsonl
 bench/datasets/smoke/papers/
+!bench/datasets/smoke/papers/
+!bench/datasets/smoke/papers/semantic-headings.pdf

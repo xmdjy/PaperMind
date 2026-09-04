@@ -84,7 +84,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, computed } from 'vue'
+import { ref, computed, onMounted } from 'vue'
 import { ElMessageBox, ElMessage } from 'element-plus'
 import { ChatLineRound, Close, Files, Plus, Setting, CircleCheck, Loading, Download } from '@element-plus/icons-vue'
 import ChatPanel from '../components/ChatPanel.vue'
@@ -105,6 +105,13 @@ const kbPapers = computed(() => paperStore.getPapersByKb(activeKbId.value).value
 const allConversations = computed(() => chatStore.conversations)
 const activeConv = computed(() => chatStore.conversations.find(c => c.id === activeConvId.value) ?? null)
 
+onMounted(async () => {
+  await chatStore.init()
+  for (const conversation of chatStore.conversations) {
+    void chatStore.autoTitleConversation(conversation.id)
+  }
+})
+
 async function doIndex(paperId: string) {
   try {
     await chatStore.indexPaper(paperId)
@@ -122,8 +129,7 @@ function toggleSelect(id: string) {
 }
 
 async function startNewConv() {
-  const title = `对话 ${chatStore.conversations.length + 1}`
-  const conv = await chatStore.newConversation(title, [...selectedPaperIds.value])
+  const conv = await chatStore.newConversation('新对话', [...selectedPaperIds.value])
   activeConvId.value = conv.id
 }
 

@@ -27,6 +27,8 @@ export interface RagOptions extends ScoreOptions {
    * 提供时跳过改写与检索，直接用它作为上下文生成回答。
    */
   externalContext?: string
+  /** Hard cap for the combined retrieval context sent to the generation model. */
+  maxContextChars?: number
 }
 
 export interface RagResult {
@@ -43,6 +45,8 @@ export interface RagResult {
   sources: string[]
   /** 本次问答实际发出的 LLM 请求数 */
   llmCalls: number
+  /** Whether retrieval context was clipped to maxContextChars. */
+  contextTruncated: boolean
 }
 
 /**
@@ -59,7 +63,10 @@ export async function runRagPipeline(
   systemPrompt: string,
   opts: RagOptions = {},
 ): Promise<RagResult> {
-  const { enableRewrite = true, externalContext, ...scoreOpts } = opts
+  const { enableRewrite = true, externalContext, maxContextChars, ...scoreOpts } = opts
+  if (maxContextChars !== undefined && (!Number.isInteger(maxContextChars) || maxContextChars <= 0)) {
+    throw new Error('maxContextChars must be a positive integer')
+  }
   let llmCalls = 0
   const skipRetrieval = externalContext !== undefined && externalContext !== ''
 
@@ -83,9 +90,11 @@ export async function runRagPipeline(
     }
   }
 
-  const context = skipRetrieval
+  const unboundedContext = skipRetrieval
     ? (externalContext as string)
     : retrievals.map(r => r.context).join('\n\n---\n\n')
+  const contextTruncated = maxContextChars !== undefined && unboundedContext.length > maxContextChars
+  const context = contextTruncated ? unboundedContext.slice(0, maxContextChars) : unboundedContext
   const sources = retrievals.flatMap(r => r.sources)
 
   // Call 3：生成回答
@@ -102,5 +111,5 @@ export async function runRagPipeline(
   llmCalls++
   const answer = await generate(messages)
 
-  return { answer, retrievals, retrievalQuery, rewritten, context, sources, llmCalls }
+  return { answer, retrievals, retrievalQuery, rewritten, context, sources, llmCalls, contextTruncated }
 }

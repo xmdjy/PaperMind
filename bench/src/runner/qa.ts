@@ -8,10 +8,10 @@ import { buildPageIndex, type IndexNode, type IndexOptions } from '../../../src/
 import { runRagPipeline, type RagOptions } from '../../../src/utils/ragPipeline'
 import type { BenchConfig, BenchResult, EvalSample, PerSampleRecord, SampleError } from '../types'
 import type { LlmClient } from '../llmClient'
-import { computeRetrievalMetrics, expandPages } from '../metrics/retrieval'
+import { computeRetrievalMetrics, estimateTokens, expandPages } from '../metrics/retrieval'
 import { answerF1, isRefusal, REFUSAL_PATTERN_VERSION } from '../metrics/answerF1'
 import { judgeAnswer, judgeUnanswerable } from '../metrics/judge'
-import { aggregate, withLatencyStats } from '../metrics/aggregate'
+import { aggregate, metricSampleCounts, withLatencyStats } from '../metrics/aggregate'
 
 /** 与 src/stores/chat.ts 的 DEFAULT_PROFILE.systemPrompt 保持一致的字面值。 */
 export const DEFAULT_SYSTEM_PROMPT =
@@ -49,6 +49,7 @@ function indexOptions(config: BenchConfig): IndexOptions {
   if (config.chunkPages !== undefined) out.chunkPages = config.chunkPages
   if (config.minSectionPages !== undefined) out.minSectionPages = config.minSectionPages
   if (config.forceFixedChunk !== undefined) out.forceFixedChunk = config.forceFixedChunk
+  if (config.maxSectionPages !== undefined) out.maxSectionPages = config.maxSectionPages
   return out
 }
 
@@ -58,6 +59,7 @@ function ragOptions(config: BenchConfig): RagOptions {
   if (config.topK !== undefined) out.topK = config.topK
   if (config.minScore !== undefined) out.minScore = config.minScore
   if (config.enableRewrite !== undefined) out.enableRewrite = config.enableRewrite
+  if (config.maxContextChars !== undefined) out.maxContextChars = config.maxContextChars
   return out
 }
 
@@ -80,6 +82,10 @@ export async function runQaTask(args: QaTaskArgs): Promise<BenchResult> {
   let sawUnanswerable = false
   // judge 不可用或部分失败而回落 pattern 时置位；meta.unanswerableMethod 据此如实标注口径
   let usedPatternFallback = false
+  let qasperEvidenceQuestions = 0
+  let mappedEvidenceQuestions = 0
+  let ambiguousEvidenceQuestions = 0
+  let unmappedEvidenceQuestions = 0
 
   for (const sample of samples) {
     if (limit !== undefined && total >= limit) break
@@ -105,6 +111,12 @@ export async function runQaTask(args: QaTaskArgs): Promise<BenchResult> {
     for (const question of sample.questions) {
       if (limit !== undefined && total >= limit) break
       total++
+      if (sample.source === 'qasper' && !question.unanswerable) {
+        qasperEvidenceQuestions++
+        if (question.evidenceMapping === 'mapped') mappedEvidenceQuestions++
+        else if (question.evidenceMapping === 'ambiguous') ambiguousEvidenceQuestions++
+        else unmappedEvidenceQuestions++
+      }
 
       // 生产 scoreAndSelect 对野值打分可能在 try 块外抛 TypeError，
       // 这里必须 catch 一切异常——单个坏样本不能终止整轮评测
@@ -124,23 +136,31 @@ export async function runQaTask(args: QaTaskArgs): Promise<BenchResult> {
           llmCalls: result.llmCalls,
           rewrite: result.rewritten ? 1 : 0,
           leafCount: leaves.length,
+          contextTruncated: result.contextTruncated ? 1 : 0,
         }
 
         if (retrieval) {
-          Object.assign(metrics, computeRetrievalMetrics({
-            selected: retrieval.selected,
-            leaves,
-            scores: retrieval.scores,
-            evidencePages: question.evidencePages,
-            context: result.context,
-            degraded: retrieval.degraded,
-          }))
+          const retrievalEligible = question.evidencePages.length > 0 && question.evidenceMapping !== 'ambiguous' && question.evidenceMapping !== 'unmapped'
+          if (retrievalEligible) {
+            Object.assign(metrics, computeRetrievalMetrics({
+              selected: retrieval.selected,
+              leaves,
+              scores: retrieval.scores,
+              evidencePages: question.evidencePages,
+              context: result.context,
+              degraded: retrieval.degraded,
+            }))
+          } else {
+            metrics.contextTokens = estimateTokens(result.context)
+          }
+          metrics.selectedContextTokens = estimateTokens(retrieval.context)
           metrics.degraded = retrieval.degraded ? 1 : 0
+          metrics.partialScoreCoverage = retrieval.degradedReason === 'incomplete-score-coverage' ? 1 : 0
           // 单叶索引短路时 scoreAndSelect 不发 LLM 打分（llmCalled=false），
           // 排序无从谈起——此时不写 mrr，否则「无排序可言」被误算成「排得差」，
           // 系统性拉低均值；缺指标交给聚合层自动剔除分母。
           // evidenceRecall / evidenceHit / contextPrecision 与有无打分无关，照常写入。
-          if (!retrieval.llmCalled) delete metrics.mrr
+          if (!retrieval.llmCalled || retrieval.degraded) delete metrics.mrr
         }
 
         // judge 只看 evidence 原文，不看检索到的上下文——避免检索失败连带压低 judge 分；
@@ -205,6 +225,10 @@ export async function runQaTask(args: QaTaskArgs): Promise<BenchResult> {
   }
 
   const raw = aggregate(perSample)
+  const counts = metricSampleCounts(perSample)
+  for (const metric of ['evidenceRecall', 'evidenceHit', 'contextPrecision', 'mrr']) {
+    if (counts[metric] !== undefined) raw[`${metric}SampleCount`] = counts[metric]
+  }
   // 重命名 0/1 指标的聚合结果为「率」，让报表列名自解释
   const metrics = withLatencyStats(renameRates(raw), client.latencies())
 
@@ -221,6 +245,13 @@ export async function runQaTask(args: QaTaskArgs): Promise<BenchResult> {
       ...(sawUnanswerable
         ? { unanswerableMethod: (args.judgeClient && !usedPatternFallback ? 'judge' : 'pattern') as 'judge' | 'pattern' }
         : {}),
+      ...(qasperEvidenceQuestions > 0
+        ? {
+            evidenceMappingCoverage: mappedEvidenceQuestions / qasperEvidenceQuestions,
+            ambiguousEvidenceRate: ambiguousEvidenceQuestions / qasperEvidenceQuestions,
+            unmappedEvidenceRate: unmappedEvidenceQuestions / qasperEvidenceQuestions,
+          }
+        : {}),
     },
     metrics,
     perSample,
@@ -234,6 +265,8 @@ function renameRates(metrics: Record<string, number>): Record<string, number> {
     evidenceHit: 'evidenceHitRate',
     degraded: 'degradedRate',
     rewrite: 'rewriteRate',
+    contextTruncated: 'contextTruncatedRate',
+    partialScoreCoverage: 'partialScoreCoverageRate',
     llmCalls: 'llmCallsPerQuery',
   }
   const out: Record<string, number> = {}
