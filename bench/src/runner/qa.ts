@@ -10,6 +10,7 @@ import type { BenchConfig, BenchResult, EvalSample, PerSampleRecord, SampleError
 import type { LlmClient } from '../llmClient'
 import { computeRetrievalMetrics, expandPages } from '../metrics/retrieval'
 import { answerF1, isRefusal, REFUSAL_PATTERN_VERSION } from '../metrics/answerF1'
+import { judgeAnswer, judgeUnanswerable } from '../metrics/judge'
 import { aggregate, withLatencyStats } from '../metrics/aggregate'
 
 /** 与 src/stores/chat.ts 的 DEFAULT_PROFILE.systemPrompt 保持一致的字面值。 */
@@ -35,6 +36,9 @@ export interface QaTaskArgs {
   limit?: number
   gitSha: string
   model: string
+  /** 提供时启用 LLM-as-judge；通常与 client 用不同模型 */
+  judgeClient?: LlmClient
+  judgeModel?: string
   /** 注入替换生产实现，单测无需真实 LLM */
   deps?: QaTaskDeps
 }
@@ -74,6 +78,8 @@ export async function runQaTask(args: QaTaskArgs): Promise<BenchResult> {
   const errors: SampleError[] = []
   let total = 0
   let sawUnanswerable = false
+  // judge 不可用或部分失败而回落 pattern 时置位；meta.unanswerableMethod 据此如实标注口径
+  let usedPatternFallback = false
 
   for (const sample of samples) {
     if (limit !== undefined && total >= limit) break
@@ -137,12 +143,47 @@ export async function runQaTask(args: QaTaskArgs): Promise<BenchResult> {
           if (!retrieval.llmCalled) delete metrics.mrr
         }
 
+        // judge 只看 evidence 原文，不看检索到的上下文——避免检索失败连带压低 judge 分
+        const evidenceText = question.evidencePages
+          .map(p => sample.pages[p] ?? '')
+          .join('\n\n')
+
         if (question.unanswerable) {
           sawUnanswerable = true
-          // 本轮仅 pattern 口径判定拒答；LLM judge 属于后续任务
-          metrics.unanswerableAccuracy = isRefusal(result.answer) ? 1 : 0
+          if (args.judgeClient) {
+            const verdict = await judgeUnanswerable({
+              question: question.question,
+              answer: result.answer,
+              client: args.judgeClient,
+            })
+            // judge 不可用时回落到正则口径，并如实记录用了哪种
+            if (verdict === null) {
+              metrics.unanswerableAccuracy = isRefusal(result.answer) ? 1 : 0
+              usedPatternFallback = true
+            } else {
+              metrics.unanswerableAccuracy = verdict ? 1 : 0
+            }
+          } else {
+            metrics.unanswerableAccuracy = isRefusal(result.answer) ? 1 : 0
+            usedPatternFallback = true
+          }
         } else {
           metrics.answerF1 = answerF1(result.answer, question.answers)
+
+          if (args.judgeClient && evidenceText) {
+            const scores = await judgeAnswer({
+              question: question.question,
+              evidence: evidenceText,
+              answer: result.answer,
+              client: args.judgeClient,
+            })
+            if (scores) {
+              metrics.judgeFactuality = scores.factuality
+              metrics.judgeCompleteness = scores.completeness
+              metrics.judgeGroundedness = scores.groundedness
+            }
+            // scores 为 null 时不写指标 → aggregate 自动从分母剔除
+          }
         }
 
         perSample.push({
@@ -170,11 +211,14 @@ export async function runQaTask(args: QaTaskArgs): Promise<BenchResult> {
     config,
     meta: {
       model,
+      ...(args.judgeModel ? { judgeModel: args.judgeModel } : {}),
       timestamp: new Date().toISOString(),
       gitSha,
       completed: perSample.length,
       total,
-      ...(sawUnanswerable ? { unanswerableMethod: 'pattern' as const } : {}),
+      ...(sawUnanswerable
+        ? { unanswerableMethod: (args.judgeClient && !usedPatternFallback ? 'judge' : 'pattern') as 'judge' | 'pattern' }
+        : {}),
     },
     metrics,
     perSample,

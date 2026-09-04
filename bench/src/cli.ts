@@ -82,12 +82,11 @@ if (args.compare) {
   process.exit(0)
 }
 
-// --judge 的前置校验：judge 客户端在 Task 14 接入，当前 flag 只做环境检查
-// TODO(Task 14): 在此创建 judge 客户端（createLlmClient({ model: process.env.BENCH_JUDGE_MODEL })）
-//   并传入 runQaTask，meta.judgeModel / unanswerableMethod 同步接线
+// --judge 的前置校验：judge 模型名必须显式给出，judge 客户端按配置矩阵逐组创建
 if (args.judge && !process.env.BENCH_JUDGE_MODEL) {
   throw new Error('使用 --judge 需设置环境变量 BENCH_JUDGE_MODEL（judge 用的 LLM 模型名）')
 }
+const judgeModel = process.env.BENCH_JUDGE_MODEL
 
 const sha = gitSha()
 const configs = await loadConfigs(args.config)
@@ -140,6 +139,10 @@ for (const config of configs) {
     for (const [source, group] of groupBySource(samples)) {
       const env = resolveEnvConfig(process.env)
       const client = createLlmClient({ ...env, useCache: args.useCache })
+      // judge 只换模型，凭据与端点沿用主配置；缓存与主 client 共目录但 key 含模型名，互不污染
+      const judgeClient = args.judge
+        ? createLlmClient({ ...env, model: judgeModel!, useCache: args.useCache })
+        : undefined
 
       process.stdout.write(`\n[QA] ${config.name}（${source}，${group.length} 篇）...\n`)
       const result = await runQaTask({
@@ -151,6 +154,8 @@ for (const config of configs) {
         limit: args.limit,
         gitSha: sha,
         model: env.model,
+        judgeClient,
+        judgeModel: args.judge ? judgeModel : undefined,
       })
       // --no-cache 当前只跳过读缓存，不覆写已有缓存文件（llmClient 待后续优化），如实记录口径
       result.meta.cacheMode = args.useCache ? 'normal' : 'bypass'

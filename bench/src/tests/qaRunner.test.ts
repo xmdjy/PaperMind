@@ -294,3 +294,81 @@ describe('runQaTask', () => {
     expect(result.metrics.evidenceRecall).toBeDefined() // 选中页覆盖与有无打分无关，照常写入
   })
 })
+
+describe('runQaTask + judge', () => {
+  const judgeClient = {
+    complete: vi.fn().mockResolvedValue('{"factuality":5,"completeness":4,"groundedness":5}'),
+    chat: vi.fn(),
+    stats: () => ({ hits: 0, misses: 0 }),
+    latencies: () => [],
+  }
+
+  it('启用 judge 时记录三维分数并标注 judgeModel', async () => {
+    const result = await runQaTask({
+      ...baseArgs,
+      judgeClient: judgeClient as never,
+      judgeModel: 'judge-model',
+      deps: makeDeps() as never,
+    })
+
+    expect(result.metrics.judgeFactuality).toBe(5)
+    expect(result.metrics.judgeCompleteness).toBe(4)
+    expect(result.metrics.judgeGroundedness).toBe(5)
+    expect(result.meta.judgeModel).toBe('judge-model')
+  })
+
+  it('judge prompt 用 evidence 原文而非检索上下文', async () => {
+    judgeClient.complete.mockClear()
+    await runQaTask({
+      ...baseArgs,
+      judgeClient: judgeClient as never,
+      judgeModel: 'judge-model',
+      deps: makeDeps() as never,
+    })
+    // sample.pages[0] === 'a'，evidencePages 为 [0]
+    expect(judgeClient.complete.mock.calls[0][0]).toContain('a')
+  })
+
+  it('judge 返回不可解析内容时不写 judge 指标，其余指标照常', async () => {
+    const badJudge = {
+      complete: vi.fn().mockResolvedValue('我拒绝评分'),
+      chat: vi.fn(), stats: () => ({ hits: 0, misses: 0 }), latencies: () => [],
+    }
+    const result = await runQaTask({
+      ...baseArgs,
+      judgeClient: badJudge as never,
+      judgeModel: 'judge-model',
+      deps: makeDeps() as never,
+    })
+
+    expect(result.metrics.judgeFactuality).toBeUndefined()
+    expect(result.metrics.answerF1).toBe(1)
+  })
+
+  it('judge 判定 unanswerable 时 meta 标注口径为 judge', async () => {
+    const refusalJudge = {
+      complete: vi.fn().mockResolvedValue('REFUSAL'),
+      chat: vi.fn(), stats: () => ({ hits: 0, misses: 0 }), latencies: () => [],
+    }
+    const deps = makeDeps({
+      runPipeline: vi.fn().mockResolvedValue({
+        answer: '无从判断', retrievals: [], retrievalQuery: 'Q?', rewritten: false,
+        context: '', sources: [], llmCalls: 1,
+      }),
+    })
+    const unanswerableSample: EvalSample = {
+      ...sample,
+      questions: [{ id: 'p1#0', question: 'Q?', answers: [], evidencePages: [], unanswerable: true }],
+    }
+    const result = await runQaTask({
+      ...baseArgs,
+      samples: [unanswerableSample],
+      judgeClient: refusalJudge as never,
+      judgeModel: 'judge-model',
+      deps: deps as never,
+    })
+
+    expect(result.metrics.unanswerableAccuracy).toBe(1)
+    expect(result.meta.unanswerableMethod).toBe('judge')
+  })
+})
