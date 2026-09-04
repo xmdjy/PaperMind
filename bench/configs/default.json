@@ -1,0 +1,11 @@
+{
+  "name": "default",
+  "matrix": {
+    "topK": [2],
+    "minScore": [4],
+    "chunkPages": [5],
+    "minSectionPages": [2],
+    "forceFixedChunk": [false],
+    "enableRewrite": [true]
+  }
+}
