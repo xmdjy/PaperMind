@@ -99,4 +99,12 @@ describe('judgeUnanswerable', () => {
     expect(await judgeUnanswerable({ question: 'Q?', answer: 'A', client: client('嗯') }))
       .toBeNull()
   })
+
+  it('judgeUnanswerable 的 client 抛错时返回 null，不打断评测', async () => {
+    const failing = {
+      complete: vi.fn().mockRejectedValue(new Error('boom')),
+      chat: vi.fn(), stats: () => ({ hits: 0, misses: 0 }), latencies: () => [],
+    } as never
+    expect(await judgeUnanswerable({ question: 'Q?', answer: 'A', client: failing })).toBeNull()
+  })
 })

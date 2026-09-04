@@ -143,10 +143,12 @@ export async function runQaTask(args: QaTaskArgs): Promise<BenchResult> {
           if (!retrieval.llmCalled) delete metrics.mrr
         }
 
-        // judge 只看 evidence 原文，不看检索到的上下文——避免检索失败连带压低 judge 分
+        // judge 只看 evidence 原文，不看检索到的上下文——避免检索失败连带压低 judge 分；
+        // trim 保证 evidencePages 全部越界时（join 结果为纯空白）也走「为空则跳过 judge 打分」的裁定
         const evidenceText = question.evidencePages
           .map(p => sample.pages[p] ?? '')
           .join('\n\n')
+          .trim()
 
         if (question.unanswerable) {
           sawUnanswerable = true

@@ -21,7 +21,9 @@ const tree: IndexNode = {
 const sample: EvalSample = {
   paperId: 'p1',
   title: 'Paper 1',
-  pages: ['a', 'b', 'c', 'd'],
+  // pages[0] 用唯一哨兵串：judge evidence 用例靠它区分「evidence 原文」与「检索上下文」，
+  // 若用普通字符（如 'a'）会与 prompt 样板文本恒匹配，断言恒真
+  pages: ['EVIDENCE_MARKER_7f3a', 'b', 'c', 'd'],
   source: 'qasper',
   questions: [
     { id: 'p1#0', question: 'Q1?', answers: ['8'], evidencePages: [0], unanswerable: false },
@@ -41,7 +43,7 @@ function makeDeps(overrides: Record<string, unknown> = {}) {
     runPipeline: vi.fn().mockResolvedValue({
       answer: '8',
       retrievals: [{
-        context: 'a\n\nb',
+        context: 'CONTEXT_MARKER_9c2e',
         sources: ['Pages 1–2: S0'],
         selected: [leaf('0', 0, 1)],
         scores: [{ id: 0, score: 9 }, { id: 1, score: 1 }],
@@ -50,7 +52,7 @@ function makeDeps(overrides: Record<string, unknown> = {}) {
       }],
       retrievalQuery: 'Q1?',
       rewritten: false,
-      context: 'a\n\nb',
+      context: 'CONTEXT_MARKER_9c2e',
       sources: ['Pages 1–2: S0'],
       llmCalls: 2,
     }),
@@ -325,8 +327,11 @@ describe('runQaTask + judge', () => {
       judgeModel: 'judge-model',
       deps: makeDeps() as never,
     })
-    // sample.pages[0] === 'a'，evidencePages 为 [0]
-    expect(judgeClient.complete.mock.calls[0][0]).toContain('a')
+    // 哨兵断言：evidence 只能来自 sample.pages[0]，不能混入 runPipeline mock 返回的检索 context；
+    // 普通短串会与 prompt 样板恒匹配（变异测试已证），必须用双方互斥的哨兵串
+    const prompt = judgeClient.complete.mock.calls[0][0]
+    expect(prompt).toContain('EVIDENCE_MARKER_7f3a')
+    expect(prompt).not.toContain('CONTEXT_MARKER_9c2e')
   })
 
   it('judge 返回不可解析内容时不写 judge 指标，其余指标照常', async () => {
