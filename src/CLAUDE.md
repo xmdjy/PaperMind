@@ -1,36 +1,55 @@
-> [根目录](../../CLAUDE.md) / src/
+[根目录](../CLAUDE.md) > **src**
 
 # src/ — 应用入口与全局配置
 
 **变更记录**
+- 2026-08-02T15:49:42: 修正面包屑（root 为 `../CLAUDE.md`）；补记 `main.ts` 引导、新增 CSS 变量、router 拆分为独立模块、测试目录扩充至 6 文件、`src/types` 说明
 - 2026-07-19T14:49:32: UI 美化——主色改为青绿、侧栏/卡片/空态/对话气泡视觉升级
 - 2026-06-07T21:33:55: 初始化
 - 2026-06-07T21:51:00: 补全 App.vue / global.css / router 文档
 
 ---
 
+## 目录概览
+
+| 子路径 | 说明 | 独立文档 |
+|--------|------|---------|
+| `main.ts` | Vue 应用引导入口 | 本文 |
+| `App.vue` | 应用根组件（侧栏 + 路由内容区） | 本文 |
+| `router/` | Vue Router hash 路由 | [src/router](./router/CLAUDE.md) |
+| `stores/` | Pinia 状态管理 | [src/stores](./stores/CLAUDE.md) |
+| `views/` | 四个路由页面 | [src/views](./views/CLAUDE.md) |
+| `components/` | 公共 UI 组件 | [src/components](./components/CLAUDE.md) |
+| `utils/` | PDF/检索/Markdown/摘要工具 | [src/utils](./utils/CLAUDE.md) |
+| `styles/global.css` | 全局样式与 CSS 变量 | 本文 |
+| `types/` | `db.d.ts`、`markdown-it-texmath.d.ts` | 本文 |
+| `tests/` | Vitest 单测 | 本文 |
+| `shims-vue.d.ts` | `*.vue` / `*.png` 模块声明 | 本文 |
+
+## main.ts — 引导入口
+
+`createApp(App)` → 全局注册所有 `@element-plus/icons-vue` 图标 → `use(createPinia())` → `use(ElementPlus)` → `use(router)` → `mount('#app')`；引入 `element-plus/dist/index.css` 与 `./styles/global.css`。
+
 ## App.vue — 应用根组件
 
 布局结构：固定侧边栏 + 路由内容区，应用全局唯一入口。
 
 ```
-┌─ sidebar (220px) ─┬─ main-content (flex:1) ─────┐
-│  logo             │  <router-view>               │
-│  nav-items        │  (fade 过渡)                  │
-│  settings link    │                              │
-└───────────────────┴──────────────────────────────┘
+┌─ sidebar (var(--sidebar-width)) ─┬─ main-content (flex:1) ─────┐
+│  logo（P 徽标 + 副标题）          │  <router-view>               │
+│  nav-items（知识库 / 对话）        │  (fade 0.18s 过渡)           │
+│  settings link（底部独立）         │                              │
+└──────────────────────────────────┴──────────────────────────────┘
 ```
 
 **关键行为**
-- `onMounted` 并行调用 `paperStore.init()` + `chatStore.init()`，确保 SQLite 数据在首次路由渲染前就绪
-- 使用 `<transition name="fade" mode="out-in">` 包裹路由切换（0.2s opacity）
-- `navItems` 只包含知识库 + 对话；设置页通过底部独立链接访问
-
----
+- `onMounted` 中 `Promise.all([paperStore.init(), chatStore.init()])`，确保 SQLite 数据在首次路由渲染前就绪
+- `<transition name="fade" mode="out-in">` 包裹路由切换
+- 侧栏使用 `backdrop-filter: blur` + `color-mix` 半透明；徽标为渐变方块
 
 ## src/styles/global.css — 全局样式与 CSS 变量
 
-### 颜色变量
+### 颜色 / 尺寸 / 动效变量（`:root`，`color-scheme: dark`）
 
 | 变量 | 值 | 用途 |
 |------|----|------|
@@ -38,55 +57,46 @@
 | `--bg-surface` | `#13161b` | 侧边栏、卡片底色 |
 | `--bg-elevated` | `#1a1f27` | 弹窗、悬浮面板 |
 | `--bg-hover` | `#222830` | 悬停高亮 |
-| `--border` | `#2a313c` | 默认边框 |
-| `--border-light` | `#3a4452` | 次级边框 |
-| `--text-primary` | `#e6e9ef` | 主要文字 |
-| `--text-secondary` | `#8b95a8` | 次要文字 |
-| `--text-muted` | `#5a6578` | 占位 / 辅助 |
-| `--accent` | `#3db8a0` | 主色调（青绿） |
-| `--accent-dim` | `rgba(61,184,160,.14)` | 主色调背景 |
-| `--gold` | `#d4a84b` | AI 消息 / 高亮颜色 |
+| `--border` / `--border-light` | `#2a313c` / `#3a4452` | 默认 / 次级边框 |
+| `--text-primary` / `--text-secondary` / `--text-muted` | `#e6e9ef` / `#8b95a8` / `#5a6578` | 文字层级 |
+| `--accent` / `--accent-dim` / `--accent-hover` | `#3db8a0` / `rgba(...,.14)` / `#52c9b2` | 主色（青绿）及其变体 |
+| `--gold` / `--gold-dim` | `#d4a84b` / `rgba(...,.12)` | AI/上下文高亮色 |
+| `--success` / `--danger` | `#4caf7d` / `#e05c5c` | 状态色 |
 | `--sidebar-width` | `220px` | 侧边栏宽度 |
+| `--radius-sm/md/lg` | `6/10/14px` | 圆角 |
+| `--shadow-sm` / `--shadow-card` | 阴影 | 卡片 / 悬浮 |
+| `--ease-out` | `cubic-bezier(.22,1,.36,1)` | 统一缓动 |
 
 ### 字体
 
-- 正文：`DM Sans`（Google Fonts，`font-family: 'DM Sans', sans-serif`）
-- 标题：`Playfair Display`（serif，通过 `.font-display` 类应用）
+- 正文：`DM Sans`（Google Fonts）；标题：`Playfair Display`（`.font-display` 类）；`.tabular-nums` 等宽数字
+- `#app` 叠加青绿/金色径向渐变作氛围背景
 
 ### Element Plus 主题覆盖
 
-通过全局 CSS 覆盖 Element Plus CSS 变量，使组件与暗色主题一致：
-- `.el-input__wrapper` — `--bg-surface` 背景，focus 时 `--accent` 描边
-- `.el-select-dropdown` — `--bg-elevated` 背景
-- `.el-tag` — `--accent-dim` 背景，`--accent` 文字
-- `.el-slider` — `--accent` 填充色
-- 所有覆盖均用 `!important` 确保优先级
+覆盖 EP CSS 变量以贴合暗色主题：`.el-button--primary`（accent）、`.el-dialog`/`.el-message-box`（elevated 背景）、`.el-input__wrapper`/`.el-textarea__inner`（focus 时 accent 描边）、`.el-select-dropdown`、`.el-tag`、`.el-slider`（accent 填充）、`.el-scrollbar`；输入类覆盖用 `!important`。
 
-### 全局动画类
+### 动画 / 无障碍
 
-- `.fade-enter-active / .fade-leave-active` — 路由切换 opacity 过渡（`transition: opacity 0.2s ease`）
+- `.fade-*`（路由 opacity 0.18s）；`prefers-reduced-motion` 下将过渡与 `.typing`/`.message` 动画降至 0.01ms
+- 全局 `:focus-visible` accent 描边（EP input 内部关闭以避免双重描边）
 
----
+## src/types/ — 类型声明
 
-## src/router/index.ts — 路由配置
+- `db.d.ts` — `window.db` 的 `DbApi` 接口（含 `index` 命名空间），并 `declare global { interface Window { db: DbApi } }`
+- `markdown-it-texmath.d.ts` — 为无类型的 `markdown-it-texmath` 提供 `TexmathOptions` 声明
+- `shims-vue.d.ts` — `*.vue`（`DefineComponent`）与 `*.png`（`string`）模块声明，支撑 `ChatPanel` 引入头像
 
-Hash 模式（`createWebHashHistory`），兼容 Electron `file://` 协议。
-
-| 路由 | 组件 | 加载方式 |
-|------|------|---------|
-| `/` | → 重定向 `/library` | — |
-| `/library` | `LibraryView` | 同步（首屏） |
-| `/library/:id` | `ReaderView` | 懒加载 |
-| `/chat` | `ChatView` | 懒加载 |
-| `/settings` | `SettingsView` | 懒加载 |
-
----
-
-## src/tests/ — 测试目录
+## src/tests/ — 测试目录（6 文件）
 
 | 文件 | 覆盖 |
 |------|------|
-| `setup.ts` | 全局 `window.db` mock（`vi.fn()`），所有测试自动注入 |
-| `paper.store.test.ts` | usePaperStore 7 个用例 |
-| `chat.store.test.ts` | useChatStore 8 个用例，含 LLM fetch mock |
-| `pdfUtils.test.ts` | `base64ToUrl` 2 个用例，mock pdfjs-dist |
+| `setup.ts` | 全局 `window.db` mock（含 `index` 命名空间），所有测试自动注入 |
+| `paper.store.test.ts` | usePaperStore 7 用例 |
+| `chat.store.test.ts` | useChatStore 12 用例（含 profiles、RAG 次数、`/abstract`） |
+| `pdfUtils.test.ts` | base64ToUrl + detectSectionBoundaries + mergeSmallSections（11 用例） |
+| `pageIndex.test.ts` | scoreAndSelect + buildPageIndex（6 用例） |
+| `abstractSummarizer.test.ts` | splitAbstractText + summarizeAcademicText 递归（2 用例） |
+| `markdown.test.ts` | renderMarkdown 结构/安全/LaTeX（7 用例） |
+
+> 依赖 `pageIndex.ts` 的测试文件顶部需 `vi.mock('pdfjs-dist/legacy/build/pdf.mjs')`，否则 Node 环境缺 `DOMMatrix` 报错。
