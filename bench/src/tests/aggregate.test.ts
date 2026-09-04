@@ -61,6 +61,36 @@ describe('aggregate', () => {
   it('空输入返回空对象', () => {
     expect(aggregate([])).toEqual({})
   })
+
+  it('NaN 不污染聚合值，被剔除后照常求均值', () => {
+    const out = aggregate([
+      rec('a', { answerF1: 0.5, broken: NaN }),
+      rec('b', { answerF1: 1.0 }),
+    ])
+    expect(out.answerF1).toBeCloseTo(0.75)
+    // NaN 指标被剔除后该键不出现，而不是把 NaN 传播出去
+    expect(out.broken).toBeUndefined()
+    expect(Number.isNaN(out.broken as number)).toBe(false)
+  })
+
+  it('±Infinity 同样被剔除', () => {
+    const out = aggregate([
+      rec('a', { mrr: Infinity, contextTokens: -Infinity, ok: 1 }),
+      rec('b', { ok: 2 }),
+    ])
+    expect(out.mrr).toBeUndefined()
+    expect(out.contextTokens).toBeUndefined()
+    expect(out.ok).toBe(1.5)
+  })
+
+  it('整列非有限时该指标键直接不出现', () => {
+    // 用 `'k' in out` 区分「键存在但值为 undefined」与「键不存在」——守卫的正确行为是后者
+    const out = aggregate([
+      rec('a', { degraded: NaN }),
+      rec('b', { degraded: Infinity }),
+    ])
+    expect('degraded' in out).toBe(false)
+  })
 })
 
 describe('withLatencyStats', () => {
