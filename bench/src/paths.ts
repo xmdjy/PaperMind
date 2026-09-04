@@ -1,6 +1,5 @@
 import { fileURLToPath } from 'node:url'
 import { resolve } from 'node:path'
-import { dirname } from 'node:path'
 
 /**
  * 从调用方模块的 import.meta.url 解析 bench 内的相对路径。

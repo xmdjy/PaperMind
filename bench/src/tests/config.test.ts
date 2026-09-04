@@ -70,6 +70,11 @@ describe('loadConfigs', () => {
     const out = await loadConfigs(join(dir, 'noext'), dir)
     expect(out).toEqual([{ name: 'bare' }])
   })
+
+  it('matrix 展开为 0 个配置（空值数组）时抛出可诊断错误', async () => {
+    writeFileSync(join(dir, 'empty.json'), JSON.stringify({ name: 'empty', matrix: { topK: [] } }))
+    await expect(loadConfigs(join(dir, 'empty.json'), dir)).rejects.toThrow(/0 个配置/)
+  })
 })
 
 describe('configLabel', () => {

@@ -93,6 +93,21 @@ describe('renderReport', () => {
     ])
     expect(md).toContain('pattern')
   })
+
+  it('pattern 口径时打印拒答模式表版本，judge 口径不打印', () => {
+    const base = { model: 'gpt-4o', timestamp: '2026-09-02T12:00:00.000Z', gitSha: 'abc1234', completed: 10, total: 10 }
+    const pattern = renderReport([
+      result('default', { unanswerableAccuracy: 0.3 }, { meta: { ...base, unanswerableMethod: 'pattern' } }),
+    ])
+    expect(pattern).toContain('拒答模式表版本')
+    expect(pattern).toContain('v1')
+    const judge = renderReport([
+      result('default', { unanswerableAccuracy: 0.3 }, { meta: { ...base, unanswerableMethod: 'judge' } }),
+    ])
+    expect(judge).not.toContain('拒答模式表版本')
+    const none = renderReport([result('default', { evidenceRecall: 0.7 })])
+    expect(none).not.toContain('拒答模式表版本')
+  })
 })
 
 describe('renderComparison', () => {

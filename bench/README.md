@@ -15,6 +15,7 @@ export BENCH_LLM_API_KEY=sk-...
 export BENCH_LLM_BASE_URL=https://api.openai.com/v1
 export BENCH_JUDGE_MODEL=gpt-4o         # 仅 --judge 时需要
 export HF_TOKEN=hf_...                  # 仅摘要任务需要
+export HF_MODEL=Bashaarat1/t5-small-arxiv-summarizer  # 可选，覆盖摘要模型（此为默认值）
 ```
 
 评测固定 `temperature=0`，与生产 profile 的 0.7 不同 —— 分数必须可复现。
@@ -65,9 +66,9 @@ npm run bench -- --compare results/a.json results/b.json  # 对比两次结果
 
 **摘要** —— `rouge1` / `rouge2` / `rougeL`、`compressionRatio`、`emptyRate`
 
-`emptyRate` 高意味着 HF 端点在返回空串，而非模型质量差 —— 这两种情况必须分开看。
+`emptyRate` 高意味着 HF 端点在返回空串，而非模型质量差 —— 这两种情况必须分开看。注意：生产 `callAbstractModel` 对空返回会抛错，真实跑分时空串多落在 errors[] 而非 emptyRate；emptyRate 主要捕捉「返回了空白串」的场景。
 
-**管线诊断** —— `degradedRate`、`rewriteRate`、`llmCallsPerQuery`、`leafCount`、`latencyP50` / `latencyP95`
+**管线诊断** —— `degradedRate`、`rewriteRate`、`llmCallsPerQuery`、`leafCount`、`latencyP50` / `latencyP95`。`leafCount` 为均值（分布可由结果 JSON 的 perSample 导出 p50/p95）；`semanticChunkRate` 未实现（可由 perSample 的分块信息后续补充）
 
 ## 已知局限
 
@@ -80,7 +81,7 @@ npm run bench -- --compare results/a.json results/b.json  # 对比两次结果
 
 ## 缓存
 
-LLM 响应按 `sha256(provider + baseUrl + model + messages)` 缓存到 `bench/cache/`（字段以 `\0` 分隔）。key 含 provider 与 baseUrl——同名模型（如 llama3）在不同端点是不同的被测对象，跨端点 / 跨模型天然隔离。这让配置矩阵可行：不同 `topK` 共享同一份索引构建结果，只有评分调用需要重发。
+LLM 响应按 `sha256(provider + baseUrl + model + messages)` 缓存到 `bench/cache/`（字段以 `\0` 分隔）。key 含 provider 与 baseUrl——同名模型（如 llama3）在不同端点是不同的被测对象，跨端点 / 跨模型天然隔离。这让配置矩阵可行：不同 `topK` 共享同一份索引构建结果，只有评分调用需要重发。失败请求也计入 misses，故 `hits/(hits+misses)` 在有错误时会偏低；runner 为纯串行，无并发去重需求——若未来并行跑样本需加 in-flight 去重，否则命中率会塌。
 
 `--no-cache` 当前只跳过**读**缓存、不覆写已有缓存文件（与 spec §8 的「强制重跑并覆写」有差距），`meta.cacheMode` 如实记录实际口径（`normal` / `bypass`）。summary 任务走 HuggingFace 摘要模型、不经过 LLM 缓存，`cacheMode` 仅做口径统一，`--no-cache` 对它无实际作用。
 

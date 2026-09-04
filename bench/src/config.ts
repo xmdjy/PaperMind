@@ -44,7 +44,11 @@ export async function loadConfigs(
     throw new Error(`配置文件不存在：${path}（--config 接受配置名或 .json 路径）`)
   }
   const file = JSON.parse(await readFile(path, 'utf-8')) as ConfigFile
-  return expandMatrix(file)
+  const configs = expandMatrix(file)
+  if (configs.length === 0) {
+    throw new Error(`配置文件 ${path} 的 matrix 展开为 0 个配置（检查是否有空值数组，如 "topK": []）`)
+  }
+  return configs
 }
 
 /** 结果文件名用（报表行标签直接用配置名）；剔除文件名非法字符（Windows 不允许文件名以点结尾）。 */

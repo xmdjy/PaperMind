@@ -1,4 +1,5 @@
 import type { BenchResult } from './types'
+import { REFUSAL_PATTERN_VERSION } from './metrics/answerF1'
 
 /** 各任务的主指标，用于在矩阵报表中标出最优行。 */
 export const PRIMARY_METRIC: Record<'qa' | 'summary', string> = {
@@ -52,6 +53,10 @@ export function renderReport(
   lines.push(`- 主指标：\`${primary}\`（加粗行为最优）`)
   if (first.meta.unanswerableMethod) {
     lines.push(`- \`unanswerableAccuracy\` 判定口径：\`${first.meta.unanswerableMethod}\``)
+    // 口径自证：pattern 口径下补印拒答模式表版本，judge 口径的版本已嵌 prompt，无需重复打印
+    if (first.meta.unanswerableMethod === 'pattern') {
+      lines.push(`- 拒答模式表版本：\`${REFUSAL_PATTERN_VERSION}\``)
+    }
   }
   lines.push('')
 
