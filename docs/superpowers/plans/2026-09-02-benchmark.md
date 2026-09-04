@@ -1938,7 +1938,9 @@ import type { EvalSample, QaQuestion } from '../types'
 /** 伪页大小：约等于一页学术论文的字符数。 */
 export const PSEUDO_PAGE_CHARS = 3000
 
-const DEFAULT_PATH = new URL('../../datasets/qasper/qasper.jsonl', import.meta.url).pathname
+// DEFAULT_PATH 必须走 bench/src/paths.ts 的 benchPath（fileURLToPath），
+// 不能用 new URL(...).pathname——后者保留百分号转义，路径含空格时静默失效（Task 2 I-5 的教训）
+const DEFAULT_PATH = () => benchPath(import.meta.url, '../../datasets/qasper/qasper.jsonl')
 
 /** QASPER 原始条目（HuggingFace allenai/qasper 的字段布局）。 */
 export interface QasperEntry {
@@ -2065,7 +2067,7 @@ const DATASET = 'allenai/qasper'
 const CONFIG = 'qasper'
 const SPLIT = 'validation'
 const PAGE_SIZE = 100
-const OUT_PATH = new URL('./qasper.jsonl', import.meta.url).pathname
+const OUT_PATH = () => benchPath(import.meta.url, './qasper.jsonl')
 
 /** 目标论文篇数；QASPER validation split 共 281 篇。 */
 const LIMIT = Number(process.env.QASPER_LIMIT ?? '60')
@@ -3211,7 +3213,7 @@ import { runSummaryTask } from './runner/summary'
 import { renderReport, renderComparison } from './report'
 import type { BenchResult, EvalSample } from './types'
 
-const RESULTS_DIR = new URL('../results/', import.meta.url).pathname
+const RESULTS_DIR = () => benchPath(import.meta.url, '../results/')
 
 function gitSha(): string {
   try {
