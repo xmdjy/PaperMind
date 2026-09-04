@@ -33,6 +33,17 @@ export function aggregate(records: PerSampleRecord[]): Record<string, number> {
   return out
 }
 
+/** Number of valid observations for every sparse metric. */
+export function metricSampleCounts(records: PerSampleRecord[]): Record<string, number> {
+  const counts: Record<string, number> = {}
+  for (const record of records) {
+    for (const [key, value] of Object.entries(record.metrics)) {
+      if (Number.isFinite(value)) counts[key] = (counts[key] ?? 0) + 1
+    }
+  }
+  return counts
+}
+
 export function withLatencyStats(
   metrics: Record<string, number>,
   latencies: number[],

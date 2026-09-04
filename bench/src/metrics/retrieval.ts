@@ -3,6 +3,10 @@ import type { IndexNode, NodeScore } from '../../../src/utils/pageIndex'
 /** 估算 token 数：英文约 4 字符/token，够用作成本代理指标。 */
 const CHARS_PER_TOKEN = 4
 
+export function estimateTokens(text: string): number {
+  return Math.round(text.length / CHARS_PER_TOKEN)
+}
+
 /** 把节点的页码区间展开为去重升序页号数组（0-based）。 */
 export function expandPages(nodes: IndexNode[]): number[] {
   const set = new Set<number>()
@@ -27,11 +31,11 @@ export interface RetrievalMetricArgs {
 }
 
 export interface RetrievalMetrics {
-  evidenceRecall: number
+  evidenceRecall?: number
   /** 单样本 0/1；聚合后成为 evidenceHitRate */
-  evidenceHit: number
-  contextPrecision: number
-  mrr: number
+  evidenceHit?: number
+  contextPrecision?: number
+  mrr?: number
   contextTokens: number
 }
 
@@ -44,29 +48,30 @@ export function computeRetrievalMetrics(args: RetrievalMetricArgs): RetrievalMet
 
   // 分母用去重后的页数：分子 covered 来自去重的 selectedPages，
   // evidencePages 里重复的页号（多个 evidence 段落落进同一伪页）不该把 recall 拉低到 1 以下
-  const evidenceRecall = evidenceSet.size > 0 ? covered.length / evidenceSet.size : 0
+  if (evidenceSet.size === 0) return { contextTokens: estimateTokens(context) }
+
+  const evidenceRecall = covered.length / evidenceSet.size
   const contextPrecision = selectedPages.length > 0 ? covered.length / selectedPages.length : 0
 
   return {
     evidenceRecall,
     evidenceHit: covered.length > 0 ? 1 : 0,
     contextPrecision,
-    mrr: computeMrr(leaves, scores, evidenceSet, degraded),
-    contextTokens: Math.round(context.length / CHARS_PER_TOKEN),
+    ...(degraded || scores.length === 0 ? {} : { mrr: computeMrr(leaves, scores, evidenceSet) }),
+    contextTokens: estimateTokens(context),
   }
 }
 
 /**
  * evidence 页首次出现在打分排序中的名次倒数。
- * 降级（打分不可用）或无 evidence 时记 0——排序本身无意义，不该给分。
+ * 调用方仅在有效 evidence 和评分时调用本函数。
  */
 function computeMrr(
   leaves: IndexNode[],
   scores: NodeScore[],
   evidenceSet: Set<number>,
-  degraded: boolean,
 ): number {
-  if (degraded || scores.length === 0 || evidenceSet.size === 0) return 0
+  if (scores.length === 0 || evidenceSet.size === 0) return 0
 
   const ranked = [...scores].sort((a, b) => b.score - a.score)
   for (let rank = 0; rank < ranked.length; rank++) {

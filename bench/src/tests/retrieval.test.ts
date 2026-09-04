@@ -135,7 +135,7 @@ describe('computeRetrievalMetrics', () => {
     expect(m.mrr).toBe(0.5)
   })
 
-  it('降级时 mrr 记 0（打分不可用，排序无意义）', () => {
+  it('降级时不写 mrr（打分不可用，排序无意义）', () => {
     const m = computeRetrievalMetrics({
       selected: [leaves[0]],
       leaves,
@@ -144,11 +144,11 @@ describe('computeRetrievalMetrics', () => {
       context: '',
       degraded: true,
     })
-    expect(m.mrr).toBe(0)
+    expect(m.mrr).toBeUndefined()
     expect(m.evidenceRecall).toBe(1)  // 降级但恰好命中，recall 照算
   })
 
-  it('evidence 标注为空时 recall/precision 记 0 但不崩', () => {
+  it('evidence 标注为空时不产生 retrieval quality 指标', () => {
     const m = computeRetrievalMetrics({
       selected: [leaves[0]],
       leaves,
@@ -157,9 +157,9 @@ describe('computeRetrievalMetrics', () => {
       context: '',
       degraded: false,
     })
-    expect(m.evidenceRecall).toBe(0)
-    expect(m.contextPrecision).toBe(0)
-    expect(m.mrr).toBe(0)
+    expect(m.evidenceRecall).toBeUndefined()
+    expect(m.contextPrecision).toBeUndefined()
+    expect(m.mrr).toBeUndefined()
   })
 
   it('未选中任何节点时不产生除零', () => {

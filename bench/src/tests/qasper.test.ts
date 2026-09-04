@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { paragraphsToPages, normalizeQasperEntry, PSEUDO_PAGE_CHARS } from '../datasets/qasper'
+import { paragraphsToPages, normalizeQasperEntry, PSEUDO_PAGE_CHARS, sectionsToPages } from '../datasets/qasper'
 
 describe('paragraphsToPages', () => {
   it('段落按字符数聚成伪页，并记录段落到页的映射', () => {
@@ -26,6 +26,13 @@ describe('paragraphsToPages', () => {
     const { pages } = paragraphsToPages([huge])
     expect(pages).toHaveLength(1)
     expect(pages[0].length).toBe(huge.length)
+  })
+
+  it('section 标题与其首段保持在同一伪页', () => {
+    const nearlyFull = 'x'.repeat(PSEUDO_PAGE_CHARS - 5)
+    const { pages, paragraphToPage } = sectionsToPages(['Intro', 'Methods'], [[nearlyFull], ['first method paragraph']])
+    expect(pages[1]).toContain('Methods\n\nfirst method paragraph')
+    expect(paragraphToPage).toEqual([0, 1])
   })
 })
 
@@ -58,6 +65,27 @@ describe('normalizeQasperEntry', () => {
     const s = normalizeQasperEntry('p', entry)
     // 三个段落都很短，全在伪页 0
     expect(s.questions[0].evidencePages).toEqual([0])
+  })
+
+  it('把 section_name 注入伪页，同时 evidence 仍按原段落映射', () => {
+    const s = normalizeQasperEntry('p', entry)
+    expect(s.pages[0]).toContain('Intro')
+    expect(s.pages[0]).toContain('Methods')
+    expect(s.questions[0].evidencePages).toEqual([0])
+    expect(s.questions[0].evidenceMapping).toBe('mapped')
+  })
+
+  it('重复或未映射 evidence 标记为不确定，且不扩大 gold set', () => {
+    const s = normalizeQasperEntry('p', {
+      ...entry,
+      full_text: { section_name: ['A'], paragraphs: [['same', 'same']] },
+      qas: { question: ['Q1?', 'Q2?'], answers: [
+        [{ answer: { free_form_answer: 'x', extractive_spans: [], unanswerable: false, evidence: ['same'] } }],
+        [{ answer: { free_form_answer: 'x', extractive_spans: [], unanswerable: false, evidence: ['missing'] } }],
+      ] },
+    })
+    expect(s.questions[0]).toMatchObject({ evidenceMapping: 'ambiguous', evidencePages: [] })
+    expect(s.questions[1]).toMatchObject({ evidenceMapping: 'unmapped', evidencePages: [] })
   })
 
   it('保留 unanswerable 标签，且该问题 answers 为空', () => {

@@ -295,6 +295,39 @@ describe('runQaTask', () => {
     expect(result.metrics.mrr).toBeUndefined()          // 无排序可言，不写而非记 0
     expect(result.metrics.evidenceRecall).toBeDefined() // 选中页覆盖与有无打分无关，照常写入
   })
+
+  it('无 evidence 样本保留运行诊断，但不进入任何 retrieval quality 分母', async () => {
+    const mixed: EvalSample = {
+      ...sample,
+      questions: [
+        sample.questions[0],
+        { id: 'p1#1', question: 'unknown?', answers: [], evidencePages: [], unanswerable: true },
+      ],
+    }
+    const result = await runQaTask({ ...baseArgs, samples: [mixed], deps: makeDeps() as never })
+    expect(result.metrics.evidenceRecall).toBe(1)
+    expect(result.metrics.evidenceRecallSampleCount).toBe(1)
+    expect(result.metrics.evidenceHitSampleCount).toBe(1)
+    expect(result.metrics.contextPrecisionSampleCount).toBe(1)
+    expect(result.metrics.mrrSampleCount).toBe(1)
+    expect(result.perSample[1].metrics.contextTokens).toBeDefined()
+    expect(result.perSample[1].metrics.evidenceRecall).toBeUndefined()
+  })
+
+  it('evidence 映射元数据只统计 QASPER，且 unmapped 进入覆盖率分母', async () => {
+    const qasper: EvalSample = {
+      ...sample,
+      source: 'qasper',
+      questions: [
+        { ...sample.questions[0], evidenceMapping: 'mapped' },
+        { id: 'p1#1', question: 'missing?', answers: ['x'], evidencePages: [], unanswerable: false, evidenceMapping: 'unmapped' },
+      ],
+    }
+    const smoke: EvalSample = { ...qasper, paperId: 'smoke', source: 'smoke' }
+    const result = await runQaTask({ ...baseArgs, samples: [qasper, smoke], deps: makeDeps() as never })
+    expect(result.meta.evidenceMappingCoverage).toBe(0.5)
+    expect(result.meta.unmappedEvidenceRate).toBe(0.5)
+  })
 })
 
 describe('runQaTask + judge', () => {

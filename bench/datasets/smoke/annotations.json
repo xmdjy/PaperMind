@@ -1,1 +1,19 @@
-[]
+[
+  {
+    "file": "semantic-headings.pdf",
+    "title": "Semantic Heading PDF Fixture",
+    "referenceAbstract": "A deterministic PDF fixture for verifying semantic section detection.",
+    "questions": [
+      {
+        "q": "What does the benchmark evaluate?",
+        "answer": "semantic retrieval",
+        "evidencePages": [1]
+      },
+      {
+        "q": "What markers are used to rebuild visual lines?",
+        "answer": "PDF text coordinates and hasEOL markers",
+        "evidencePages": [3]
+      }
+    ]
+  }
+]

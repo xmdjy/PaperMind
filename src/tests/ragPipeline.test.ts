@@ -23,6 +23,28 @@ const singleLeafTree: IndexNode = leaf('only', 0, 1)
 const pages = ['p1', 'p2', 'p3', 'p4']
 
 describe('runRagPipeline', () => {
+  it('caps the generation context at maxContextChars', async () => {
+    const root: IndexNode = {
+      title: 'Paper', nodeId: 'root', startPage: 0, endPage: 1, summary: '',
+      nodes: [
+        { title: 'A', nodeId: '0', startPage: 0, endPage: 0, summary: '', nodes: [] },
+        { title: 'B', nodeId: '1', startPage: 1, endPage: 1, summary: '', nodes: [] },
+      ],
+    }
+    const generate = vi.fn().mockResolvedValue('answer')
+    const result = await runRagPipeline(
+      [{ tree: root, pages: ['a'.repeat(40), 'b'.repeat(40)] }], 'q', [],
+      vi.fn().mockResolvedValue('[{"id":0,"score":9},{"id":1,"score":8}]'), generate, 'system',
+      { maxContextChars: 30 },
+    )
+    expect(result.context).toHaveLength(30)
+    expect(result.contextTruncated).toBe(true)
+    expect(generate.mock.calls[0][0][0].content).toContain('a'.repeat(30))
+  })
+
+  it('rejects a non-positive context limit', async () => {
+    await expect(runRagPipeline([], 'q', [], vi.fn(), vi.fn(), 'system', { maxContextChars: 0 })).rejects.toThrow(/maxContextChars/)
+  })
   it('无历史 + 单叶索引时只发生成这一次调用', async () => {
     const llm = vi.fn()
     const generate = vi.fn().mockResolvedValue('answer')

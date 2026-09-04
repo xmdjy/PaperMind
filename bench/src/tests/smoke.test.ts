@@ -30,6 +30,12 @@ afterEach(() => rmSync(dir, { recursive: true, force: true }))
 const extract = async () => ['p1', 'p2', 'p3', 'p4', 'p5']
 
 describe('loadSmokeDataset', () => {
+  it('仓库自带的真实 PDF fixture 有可执行的人工标注', async () => {
+    const samples = await loadSmokeDataset(undefined, { extract })
+    expect(samples).toHaveLength(1)
+    expect(samples[0].paperId).toBe('semantic-headings.pdf')
+    expect(samples[0].questions.map(question => question.evidencePages)).toEqual([[0], [2]])
+  })
   it('加载 PDF 并挂上标注', async () => {
     const samples = await loadSmokeDataset(dir, { extract })
     expect(samples).toHaveLength(1)

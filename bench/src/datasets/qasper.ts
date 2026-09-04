@@ -60,14 +60,55 @@ export function paragraphsToPages(paragraphs: string[]): {
   return { pages, paragraphToPage }
 }
 
+/** Like paragraphsToPages, but injects each original section heading before its first paragraph. */
+export function sectionsToPages(sectionNames: string[], sections: string[][]): {
+  pages: string[]
+  paragraphToPage: number[]
+} {
+  const pages: string[] = []
+  const paragraphToPage: number[] = []
+  let buffer: string[] = []
+  let bufferLen = 0
+  const append = (text: string) => {
+    if (bufferLen > 0 && bufferLen + text.length > PSEUDO_PAGE_CHARS) {
+      pages.push(buffer.join('\n\n'))
+      buffer = []
+      bufferLen = 0
+    }
+    buffer.push(text)
+    bufferLen += text.length
+  }
+  for (let sectionIndex = 0; sectionIndex < sections.length; sectionIndex++) {
+    const heading = sectionNames[sectionIndex]?.trim()
+    const paragraphs = sections[sectionIndex]
+    const firstParagraph = paragraphs[0]
+    // Keep a heading and its first paragraph on the same pseudo page. Otherwise a
+    // nearly full preceding page can strand the heading from the content it labels.
+    if (heading && firstParagraph !== undefined) {
+      append(`${heading}\n\n${firstParagraph}`)
+      paragraphToPage.push(pages.length)
+    } else if (heading) {
+      append(heading)
+    }
+    for (const paragraph of paragraphs.slice(firstParagraph === undefined ? 0 : 1)) {
+      append(paragraph)
+      paragraphToPage.push(pages.length)
+    }
+  }
+  if (buffer.length > 0) pages.push(buffer.join('\n\n'))
+  return { pages, paragraphToPage }
+}
+
 export function normalizeQasperEntry(paperId: string, entry: QasperEntry): EvalSample {
   const flatParagraphs = entry.full_text.paragraphs.flat()
-  const { pages, paragraphToPage } = paragraphsToPages(flatParagraphs)
+  const { pages, paragraphToPage } = sectionsToPages(entry.full_text.section_name, entry.full_text.paragraphs)
 
   // evidence 是段落原文字符串，建索引以便反查段落下标
-  const paragraphIndex = new Map<string, number>()
+  const paragraphIndex = new Map<string, number[]>()
   flatParagraphs.forEach((p, i) => {
-    if (!paragraphIndex.has(p)) paragraphIndex.set(p, i)
+    const indexes = paragraphIndex.get(p) ?? []
+    indexes.push(i)
+    paragraphIndex.set(p, indexes)
   })
 
   const questions: QaQuestion[] = entry.qas.question.map((question, i) => {
@@ -76,15 +117,25 @@ export function normalizeQasperEntry(paperId: string, entry: QasperEntry): EvalS
 
     const answers: string[] = []
     const evidencePages = new Set<number>()
+    let evidenceMapping: QaQuestion['evidenceMapping'] = 'mapped'
+    let hasEvidence = false
     for (const { answer } of annotations) {
       if (answer.unanswerable) continue
       if (answer.free_form_answer) answers.push(answer.free_form_answer)
       answers.push(...answer.extractive_spans)
       for (const ev of answer.evidence) {
-        const paraIdx = paragraphIndex.get(ev)
-        if (paraIdx !== undefined) evidencePages.add(paragraphToPage[paraIdx])
+        hasEvidence = true
+        const paragraphIndexes = paragraphIndex.get(ev)
+        if (!paragraphIndexes) {
+          evidenceMapping = 'unmapped'
+        } else if (paragraphIndexes.length === 1) {
+          evidencePages.add(paragraphToPage[paragraphIndexes[0]])
+        } else if (evidenceMapping !== 'unmapped') {
+          evidenceMapping = 'ambiguous'
+        }
       }
     }
+    if (!hasEvidence) evidenceMapping = 'unmapped'
 
     return {
       id: `${paperId}#${i}`,
@@ -92,6 +143,7 @@ export function normalizeQasperEntry(paperId: string, entry: QasperEntry): EvalS
       answers,
       evidencePages: [...evidencePages].sort((a, b) => a - b),
       unanswerable,
+      ...(unanswerable ? {} : { evidenceMapping }),
     }
   })
 
@@ -114,8 +166,16 @@ export async function loadQasperDataset(path: string = DEFAULT_PATH()): Promise<
     )
   }
   const content = await readFile(path, 'utf-8')
-  return content
+  const samples = content
     .split('\n')
     .filter(line => line.trim().length > 0)
     .map(line => JSON.parse(line) as EvalSample)
+  for (const sample of samples) {
+    for (const question of sample.questions) {
+      if (!question.unanswerable && question.evidenceMapping === undefined) {
+        throw new Error('QASPER 数据集缺少 evidenceMapping；请重新运行 fetch.ts 以生成当前格式的数据集。')
+      }
+    }
+  }
+  return samples
 }

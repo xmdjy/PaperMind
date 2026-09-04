@@ -6,23 +6,34 @@ pdfjsLib.GlobalWorkerOptions.workerSrc = './pdf.worker.min.mjs'
 // ── 语义分块：节标题识别模式（英文 + 中文）───────────────────────────────────
 const SECTION_PATTERNS: RegExp[] = [
   // 英文编号节标题："1. Introduction"、"2 Methods"、"1.1 Background"
-  /^(\d+\.?\d*\.?\s+)[A-Z][a-zA-Z\s]{2,}$/m,
+  /^(\d+\.?\d*\.?\s+)[A-Z][a-zA-Z\s]{2,}$/,
   // 英文全大写标题："INTRODUCTION"、"RELATED WORK"
-  /^[A-Z][A-Z\s]{3,30}$/m,
+  /^[A-Z][A-Z\s]{3,30}$/,
   // 常见节名称（大小写不敏感）
-  /^(Abstract|Introduction|Methods?|Results?|Discussion|Conclusion|References|Acknowledgements?|Appendix)$/im,
+  /^(Abstract|Introduction|Methods?|Results?|Discussion|Conclusion|References|Acknowledgements?|Appendix)$/i,
   // 中文章节："第一章"、"第3节"
-  /^第[一二三四五六七八九十\d]+[章节]/m,
+  /^第[一二三四五六七八九十\d]+[章节]/,
   // 中文编号节："1 引言"、"3.1 实验设置"、"1.1 研究背景"
-  /^\d+(?:\.\d+)*[\s]+[一-龥]{2,10}$/m,
+  /^\d+(?:\.\d+)*[\s]+[一-龥]{2,10}$/,
 ]
 
 /** 扫描每页文本，返回节标题所在的页码索引列表（0-based）。 */
 export function detectSectionBoundaries(pages: string[]): number[] {
   const boundaries: number[] = []
+  let previousHeading: string | undefined
+  let previousHeadingPage = -2
   for (let i = 0; i < pages.length; i++) {
-    if (SECTION_PATTERNS.some(pattern => pattern.test(pages[i]))) {
+    const lines = pages[i].split(/\r?\n/).map(line => line.trim()).filter(Boolean)
+    const heading = lines.find(line => SECTION_PATTERNS.some(pattern => pattern.test(line)))
+    // Running headers often repeat the section title on every adjacent page. Keep its
+    // first occurrence as the boundary, rather than turning each page into a section.
+    const normalizedHeading = heading?.replace(/\s+/g, ' ').toLocaleLowerCase()
+    if (heading && !(normalizedHeading === previousHeading && previousHeadingPage === i - 1)) {
       boundaries.push(i)
+    }
+    if (normalizedHeading) {
+      previousHeading = normalizedHeading
+      previousHeadingPage = i
     }
   }
   return boundaries
@@ -74,9 +85,37 @@ export async function extractPages(base64: string): Promise<string[]> {
   for (let i = 1; i <= pdf.numPages; i++) {
     const page = await pdf.getPage(i)
     const content = await page.getTextContent()
-    pages.push(content.items.map((it: any) => it.str).join(' '))
+    pages.push(reconstructTextLines(content.items as PdfTextItem[]))
   }
   return pages
+}
+
+interface PdfTextItem {
+  str?: string
+  transform?: number[]
+  hasEOL?: boolean
+}
+
+/** Rebuild visual text lines from PDF.js items so line-anchored headings survive extraction. */
+export function reconstructTextLines(items: PdfTextItem[]): string {
+  const lines: Array<{ y: number; items: Array<{ x: number; text: string }> }> = []
+  let current: { y: number; items: Array<{ x: number; text: string }> } | undefined
+  const flush = () => { current = undefined }
+  for (const item of items) {
+    const text = item.str?.trim()
+    if (!text) continue
+    const x = item.transform?.[4] ?? 0
+    const y = item.transform?.[5] ?? 0
+    if (!current || Math.abs(current.y - y) > 2) {
+      current = { y, items: [] }
+      lines.push(current)
+    }
+    current.items.push({ x, text })
+    if (item.hasEOL) flush()
+  }
+  return lines
+    .map(line => line.items.sort((a, b) => a.x - b.x).map(item => item.text).join(' '))
+    .join('\n')
 }
 
 async function summarizeRange(
@@ -102,6 +141,8 @@ export interface IndexOptions {
   minSectionPages?: number
   /** 强制使用固定切块，跳过语义分块（消融对比用），默认 false */
   forceFixedChunk?: boolean
+  /** Semantic sections longer than this are split into bounded leaves. */
+  maxSectionPages?: number
 }
 
 export async function buildPageIndex(
@@ -109,10 +150,13 @@ export async function buildPageIndex(
   llm: LLMFn,
   opts: IndexOptions = {},
 ): Promise<IndexNode> {
-  const { chunkPages = CHUNK, minSectionPages = 2, forceFixedChunk = false } = opts
+  const { chunkPages = CHUNK, minSectionPages = 2, forceFixedChunk = false, maxSectionPages } = opts
+  if (maxSectionPages !== undefined && (!Number.isInteger(maxSectionPages) || maxSectionPages < minSectionPages)) {
+    throw new Error('maxSectionPages must be an integer greater than or equal to minSectionPages')
+  }
   // 语义分块：识别节边界；边界不足2个时降级为固定切块
   const boundaries = forceFixedChunk ? [] : detectSectionBoundaries(pages)
-  let ranges: Array<{ start: number; end: number }>
+  let ranges: Array<{ start: number; end: number; part?: number }>
 
   if (boundaries.length >= 2) {
     ranges = boundaries.map((start, i) => ({
@@ -132,10 +176,28 @@ export async function buildPageIndex(
     }
   }
 
+  if (maxSectionPages !== undefined) {
+    ranges = ranges.flatMap(range => {
+      const pieces: Array<{ start: number; end: number; part?: number }> = []
+      for (let start = range.start; start <= range.end; start += maxSectionPages) {
+        pieces.push({ start, end: Math.min(start + maxSectionPages - 1, range.end), part: pieces.length + 1 })
+      }
+      // Do not turn a small remainder into a one-page leaf after min-section merging.
+      if (pieces.length > 1 && pieces.at(-1)!.end - pieces.at(-1)!.start + 1 < minSectionPages) {
+        pieces[pieces.length - 2].end = pieces.at(-1)!.end
+        pieces.pop()
+      }
+      if (pieces.length === 1) delete pieces[0].part
+      return pieces
+    })
+  }
+
   const leaves: IndexNode[] = []
   for (let i = 0; i < ranges.length; i++) {
     const { start, end } = ranges[i]
-    leaves.push(await summarizeRange(pages, start, end, String(i), llm))
+    const leaf = await summarizeRange(pages, start, end, String(i), llm)
+    if (ranges[i].part) leaf.title = `${leaf.title} (Part ${ranges[i].part})`
+    leaves.push(leaf)
   }
   if (leaves.length === 1) return leaves[0]
 
@@ -176,10 +238,39 @@ export interface RetrievalResult {
   degraded: boolean
   /** 本次检索是否实际发出了 LLM 打分请求（单叶节点短路时为 false） */
   llmCalled: boolean
+  /** A stable diagnostic for degraded score parsing, if applicable. */
+  degradedReason?: 'invalid-json' | 'invalid-score-schema' | 'incomplete-score-coverage' | 'score-request-failed'
 }
 
 function formatSource(n: IndexNode): string {
   return `Pages ${n.startPage + 1}–${n.endPage + 1}: ${n.title}`
+}
+
+export function parseAndValidateScores(raw: string, leafCount: number): NodeScore[] {
+  const cleaned = raw.replace(/```(?:json)?\s*|```/gi, '').trim()
+  const start = cleaned.indexOf('[')
+  const end = cleaned.lastIndexOf(']')
+  if (start < 0 || end < start) throw new Error('invalid-json')
+  let parsed: unknown
+  try {
+    parsed = JSON.parse(cleaned.slice(start, end + 1))
+  } catch {
+    throw new Error('invalid-json')
+  }
+  if (!Array.isArray(parsed)) throw new Error('invalid-score-schema')
+  const seen = new Set<number>()
+  const scores: NodeScore[] = []
+  for (const item of parsed) {
+    if (!item || typeof item !== 'object') throw new Error('invalid-score-schema')
+    const { id, score } = item as Record<string, unknown>
+    if (typeof id !== 'number' || !Number.isInteger(id) || typeof score !== 'number' || !Number.isFinite(score) || score < 0 || score > 10 || id < 0 || id >= leafCount || seen.has(id)) {
+      throw new Error('invalid-score-schema')
+    }
+    seen.add(id)
+    scores.push({ id, score })
+  }
+  if (seen.size !== leafCount) throw new Error('incomplete-score-coverage')
+  return scores
 }
 
 /** 对所有叶节点打分，返回 Top-K 合并上下文。JSON 解析失败时降级为第一节点。 */
@@ -213,9 +304,9 @@ export async function scoreAndSelect(
   let selected: IndexNode[]
   let scores: NodeScore[] = []
   let degraded = false
+  let degradedReason: RetrievalResult['degradedReason']
   try {
-    const raw = (await llm(prompt)).replace(/```json\n?|```/g, '').trim()
-    scores = JSON.parse(raw) as NodeScore[]
+    scores = parseAndValidateScores(await llm(prompt), leaves.length)
     const sorted = [...scores].sort((a, b) => b.score - a.score)
 
     // 最高分节点无条件纳入；其余需达到 minScore
@@ -225,10 +316,18 @@ export async function scoreAndSelect(
     }
 
     // 按文档顺序排列（startPage 升序）
-    selected = picked.sort((a, b) => a.startPage - b.startPage)
-  } catch {
+    selected = [...new Map(picked.map(node => [node.nodeId, node])).values()]
+      .sort((a, b) => a.startPage - b.startPage)
+  } catch (error) {
     scores = []
     degraded = true
+    degradedReason = error instanceof Error && [
+      'invalid-json',
+      'invalid-score-schema',
+      'incomplete-score-coverage',
+    ].includes(error.message)
+      ? error.message as RetrievalResult['degradedReason']
+      : 'score-request-failed'
     selected = [leaves[0]]
   }
 
@@ -236,5 +335,5 @@ export async function scoreAndSelect(
     .map(n => pages.slice(n.startPage, n.endPage + 1).join('\n\n'))
     .join('\n\n---\n\n')
 
-  return { context, sources: selected.map(formatSource), selected, scores, degraded, llmCalled: true }
+  return { context, sources: selected.map(formatSource), selected, scores, degraded, llmCalled: true, ...(degradedReason ? { degradedReason } : {}) }
 }
