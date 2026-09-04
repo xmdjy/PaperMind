@@ -65,6 +65,26 @@ describe('useChatStore', () => {
     expect(conv.messages[0].content).toBe('Hello')
   })
 
+  it('autoTitleConversation names an untitled conversation from its first exchange', async () => {
+    global.fetch = vi.fn().mockResolvedValue({
+      ok: true,
+      json: () => Promise.resolve({ choices: [{ message: { content: 'DeepSeek-R1 推理能力分析' } }] }),
+    }) as any
+    const store = useChatStore()
+    await store.init()
+    const conv = await store.newConversation('新对话', [])
+    await store.addMessage(conv.id, 'user', 'DeepSeek R1 的推理能力有什么特点？')
+    await store.addMessage(conv.id, 'assistant', '它通过强化学习提升了复杂推理表现。')
+
+    await store.autoTitleConversation(conv.id)
+
+    expect(conv.title).toBe('DeepSeek-R1 推理能力分析')
+    expect((globalThis as any).mockDb.chat.updateConversation).toHaveBeenCalledWith(
+      conv.id,
+      { title: 'DeepSeek-R1 推理能力分析' },
+    )
+  })
+
   it('removeConversation deletes from list', async () => {
     const store = useChatStore()
     await store.init()

@@ -2,7 +2,7 @@
   <div class="app-shell">
     <aside class="sidebar" aria-label="主导航">
       <div class="sidebar-logo">
-        <span class="logo-mark" aria-hidden="true">P</span>
+        <img class="logo-mark" :src="paperMindIcon" alt="" />
         <div class="logo-copy">
           <span class="logo-text font-display">PaperMind</span>
           <span class="logo-sub">本地论文助手</span>
@@ -44,6 +44,8 @@ import { onMounted } from 'vue'
 import { Collection, ChatDotRound, Setting } from '@element-plus/icons-vue'
 import { usePaperStore } from './stores/paper'
 import { useChatStore } from './stores/chat'
+
+const paperMindIcon = new URL('../assets/papermind-icon.svg', import.meta.url).href
 
 const paperStore = usePaperStore()
 const chatStore = useChatStore()
@@ -87,18 +89,8 @@ const navItems = [
 .logo-mark {
   width: 32px;
   height: 32px;
-  background: linear-gradient(145deg, var(--accent-hover), var(--accent));
-  border-radius: 9px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  font-family: 'Playfair Display', serif;
-  font-size: 17px;
-  font-weight: 700;
-  color: #0c0e11;
+  display: block;
   flex-shrink: 0;
-  line-height: 1;
-  box-shadow: 0 0 0 1px rgba(61, 184, 160, 0.25), 0 6px 16px rgba(61, 184, 160, 0.18);
 }
 
 .logo-copy {

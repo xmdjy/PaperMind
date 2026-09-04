@@ -49,6 +49,23 @@ const DEFAULT_PROFILE: LLMProfile = {
   systemPrompt: '你是一个专业的学术论文阅读助手，帮助用户理解和分析论文内容。',
 }
 
+const NEW_CONVERSATION_TITLE = '新对话'
+const LEGACY_CONVERSATION_TITLE = /^对话\s+\d+$/
+
+function isUntitledConversation(title: string): boolean {
+  return title === NEW_CONVERSATION_TITLE || LEGACY_CONVERSATION_TITLE.test(title)
+}
+
+function normalizeConversationTitle(value: string): string {
+  return value
+    .trim()
+    .replace(/^标题\s*[:：]\s*/i, '')
+    .replace(/^[『「“'\"]+|[』」”'\"]+$/g, '')
+    .replace(/\s+/g, ' ')
+    .slice(0, 24)
+    .trim()
+}
+
 async function readErrorBody(res: Response): Promise<string> {
   try {
     const data = await res.json()
@@ -305,6 +322,35 @@ export const useChatStore = defineStore('chat', () => {
     await window.db.chat.updateConversation(convId, { paperIds })
   }
 
+  async function autoTitleConversation(convId: string): Promise<void> {
+    const conversation = conversations.value.find(c => c.id === convId)
+    if (!conversation || !isUntitledConversation(conversation.title)) return
+
+    const firstUserMessage = conversation.messages.find(message => message.role === 'user')
+    const firstAssistantMessage = conversation.messages.find(message => message.role === 'assistant')
+    if (!firstUserMessage || !firstAssistantMessage) return
+
+    try {
+      const generatedTitle = normalizeConversationTitle(await callLLM([
+        {
+          role: 'system',
+          content: '根据首轮对话生成一个准确、简洁的中文会话标题。只返回标题本身，不要引号、前缀或句号；不超过 24 个字符。',
+        },
+        {
+          role: 'user',
+          content: `用户提问：${firstUserMessage.content.slice(0, 800)}\n\n助手回答：${firstAssistantMessage.content.slice(0, 1200)}`,
+        },
+      ]))
+      const latestConversation = conversations.value.find(c => c.id === convId)
+      if (!generatedTitle || !latestConversation || !isUntitledConversation(latestConversation.title)) return
+
+      latestConversation.title = generatedTitle
+      await window.db.chat.updateConversation(convId, { title: generatedTitle })
+    } catch {
+      // 标题只是辅助信息，模型不可用时保留“新对话”即可。
+    }
+  }
+
   // ---------- /abstract ----------
 
   async function readPaperPages(paperId: string): Promise<string[]> {
@@ -395,7 +441,7 @@ export const useChatStore = defineStore('chat', () => {
     init,
     addProfile, updateProfile, removeProfile,
     setChatProfileId, setIndexProfileId, setAbstractToken,
-    newConversation, addMessage, removeConversation, syncPaperIds,
+    newConversation, addMessage, removeConversation, syncPaperIds, autoTitleConversation,
     sendMessage, indexPaper,
     ABSTRACT_MODEL,
   }

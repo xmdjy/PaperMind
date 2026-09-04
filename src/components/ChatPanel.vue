@@ -136,6 +136,7 @@ async function send() {
 
   try {
     await chatStore.sendMessage(props.conversation.id, message, context || undefined)
+    void chatStore.autoTitleConversation(props.conversation.id)
   } catch (e: any) {
     ElMessage.error(`请求失败：${e.message}。请检查设置中的 API 配置。`)
   } finally {
