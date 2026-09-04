@@ -45,7 +45,7 @@ export function rougeL(prediction: string, reference: string): number {
   const ref = tokens(reference)
   if (pred.length === 0 || ref.length === 0) return 0
 
-  // 滚动数组的 LCS，空间 O(min(m,n))
+  // 滚动数组的 LCS，空间 O(|ref|)（两条 ref.length+1 的滚动数组）
   let prev = new Array<number>(ref.length + 1).fill(0)
   let curr = new Array<number>(ref.length + 1).fill(0)
   for (let i = 1; i <= pred.length; i++) {
@@ -55,7 +55,7 @@ export function rougeL(prediction: string, reference: string): number {
         : Math.max(prev[j], curr[j - 1])
     }
     ;[prev, curr] = [curr, prev]
-    curr.fill(0)
+    curr.fill(0) // 防御性重置；当前逻辑下每格读前必写，此行冗余但保留以防后续改动引入脏读
   }
   return f1(prev[ref.length], pred.length, ref.length)
 }
@@ -72,6 +72,8 @@ export interface SummaryMetrics {
 /**
  * 摘要为空时显式标记 empty 并把 ROUGE 记 0。
  * HF 社区端点不稳，不区分「模型差」与「端点挂」会导致误判。
+ *
+ * @param sourceLength 原文字符数（须与 summary.length 同单位，否则压缩比失去意义）
  */
 export function computeSummaryMetrics(
   summary: string,

@@ -24,6 +24,19 @@ describe('rougeN', () => {
     expect(rougeN('', 'the cat', 1)).toBe(0)
     expect(rougeN('the cat', '', 1)).toBe(0)
   })
+
+  it('归一化后才变空的输入（纯冠词）为 0 而非 1', () => {
+    // 'the' 去冠词后归一化为空串——若 tokens() 未做空串短路，''.split(' ') 得 ['']，
+    // 两侧同为 [''] 会误判为 1.0。这是空串短路的判别式用例。
+    expect(rougeN('the', 'the', 1)).toBe(0)
+  })
+
+  it('重复 n-gram 按出现次数取 min 截断', () => {
+    // pred bigrams（重叠切分）: [x y]×3 + [y x]×2，共 5 个；ref bigrams: [x y]×1
+    // → common 按 min 截断为 1（若不截断则 [x y] 全中得 3）
+    // precision 1/5, recall 1/1 → F1 = 1/3
+    expect(rougeN('x y x y x y', 'x y', 2)).toBeCloseTo(1 / 3)
+  })
 })
 
 describe('rougeL', () => {
@@ -53,6 +66,13 @@ describe('computeSummaryMetrics', () => {
     expect(m.rougeL).toBe(1)
     expect(m.compressionRatio).toBeCloseTo(11 / 100)
     expect(m.empty).toBe(0)
+
+    // rouge1 与 rouge2 可区分的输入：unigram 全中、bigram 顺序不同——
+    // 若实现把 rouge2 误接成 n=1，这里会得到 1 而非 0
+    const m2 = computeSummaryMetrics('alpha beta gamma', 'gamma beta alpha', 100)
+    expect(m2.rouge1).toBe(1)
+    expect(m2.rouge2).toBe(0)
+    expect(m2.empty).toBe(0)
   })
 
   it('摘要为空或纯空白时 empty=1，ROUGE 全 0', () => {
