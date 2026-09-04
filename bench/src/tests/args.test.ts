@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { parseArgs } from '../args'
+import { parseArgs, fileStamp } from '../args'
 
 describe('parseArgs', () => {
   it('无参数时用默认值', () => {
@@ -44,11 +44,26 @@ describe('parseArgs', () => {
     expect(() => parseArgs(['--limit', 'abc'])).toThrow(/--limit/)
   })
 
+  it('--config 作为最后 token 缺值时抛错', () => {
+    expect(() => parseArgs(['--config'])).toThrow(/--config/)
+  })
+
+  it('--out 作为最后 token 缺值时抛错', () => {
+    expect(() => parseArgs(['--out'])).toThrow(/--out/)
+  })
+
   it('--compare 只给一个路径时抛错', () => {
     expect(() => parseArgs(['--compare', 'a.json'])).toThrow(/两个/)
   })
 
   it('未知 flag 时抛错，避免拼错静默生效', () => {
     expect(() => parseArgs(['--topk', '2'])).toThrow(/--topk/)
+  })
+})
+
+describe('fileStamp', () => {
+  it('转文件名安全格式：保留毫秒；无毫秒来源追加 Date.now() 兜底', () => {
+    expect(fileStamp('2026-09-04T10:00:00.123Z')).toBe('2026-09-04T10-00-00-123Z')
+    expect(fileStamp('2026-09-04T10:00:00Z')).toMatch(/^2026-09-04T10-00-00Z-\d+$/)
   })
 })

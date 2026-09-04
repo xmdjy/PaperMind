@@ -13,6 +13,16 @@ const TASKS = ['qa', 'summary', 'all'] as const
 const DATASETS = ['qasper', 'smoke', 'all'] as const
 
 /**
+ * 结果文件名时间戳部分：ISO 时间转文件名安全格式。
+ * toISOString() 自带毫秒，正常已能区分同秒内多次写盘；若来源串不含毫秒，
+ * 追加 Date.now() 兜底，防止多配置矩阵下同秒写盘互相覆盖。
+ */
+export function fileStamp(timestamp: string): string {
+  const safe = timestamp.replace(/[:.]/g, '-')
+  return /\.\d{3}Z?$/.test(timestamp) ? safe : `${safe}-${Date.now()}`
+}
+
+/**
  * 解析 CLI 参数为强类型 BenchArgs。
  * 任何非法取值立即抛错而不是回落默认值——拼错的 flag 静默生效
  * 会让评测结果看起来正常实则跑错配置，比直接失败危害大得多。
@@ -45,9 +55,14 @@ export function parseArgs(argv: string[]): BenchArgs {
         args.dataset = v as BenchArgs['dataset']
         break
       }
-      case '--config':
-        args.config = argv[++i]
+      case '--config': {
+        // 作为最后一个 token 时取到 undefined，后续 loadConfigs 会裸 TypeError，
+        // 在此提前给出可诊断的报错
+        const v = argv[++i]
+        if (!v) throw new Error('--config 需要一个值（配置名或 .json 路径）')
+        args.config = v
         break
+      }
       case '--limit': {
         const v = Number(argv[++i])
         if (!Number.isInteger(v) || v <= 0) {
@@ -56,9 +71,12 @@ export function parseArgs(argv: string[]): BenchArgs {
         args.limit = v
         break
       }
-      case '--out':
-        args.out = argv[++i]
+      case '--out': {
+        const v = argv[++i]
+        if (!v) throw new Error('--out 需要一个值（结果文件路径）')
+        args.out = v
         break
+      }
       case '--judge':
         args.judge = true
         break

@@ -7,7 +7,7 @@
 import { execSync } from 'node:child_process'
 import { mkdirSync, readFileSync, writeFileSync, accessSync, constants } from 'node:fs'
 import { join, dirname } from 'node:path'
-import { parseArgs } from './args'
+import { parseArgs, fileStamp } from './args'
 import { loadConfigs, configLabel } from './config'
 import { createLlmClient, resolveEnvConfig } from './llmClient'
 import { loadQasperDataset } from './datasets/qasper'
@@ -62,8 +62,22 @@ const args = parseArgs(process.argv.slice(2))
 // --compare 是独立路径：只读两份结果输出差异表，不跑评测
 if (args.compare) {
   const [pathA, pathB] = args.compare
-  const a = JSON.parse(readFileSync(pathA, 'utf-8')) as BenchResult
-  const b = JSON.parse(readFileSync(pathB, 'utf-8')) as BenchResult
+  // readFileSync / JSON.parse 裸抛英文 stack 难以定位，转成中文报错并保留原始原因
+  const load = (p: string): BenchResult => {
+    let raw: string
+    try {
+      raw = readFileSync(p, 'utf-8')
+    } catch (err) {
+      throw new Error(`结果文件不存在：${p}（原始错误：${err instanceof Error ? err.message : err}）`)
+    }
+    try {
+      return JSON.parse(raw) as BenchResult
+    } catch (err) {
+      throw new Error(`结果文件不是合法 JSON：${p}（原始错误：${err instanceof Error ? err.message : err}）`)
+    }
+  }
+  const a = load(pathA)
+  const b = load(pathB)
   process.stdout.write(renderComparison(a, b))
   process.exit(0)
 }
@@ -100,12 +114,17 @@ const summaryResults: BenchResult[] = []
 /**
  * 结果文件名。--dataset all 时 QA 结果按来源分组各写一份，带 source 后缀防混淆；
  * --out 显式指定时追加后缀（同名会互相覆盖），单一来源时不加后缀保持简报语义。
+ * 多配置矩阵（--config 展开多个配置）+ --out 时 fileTag 只含 source 不含配置标识，
+ * 每个配置会写出同名文件、后写的覆盖先写的，评测数据静默丢失——
+ * 故 configs.length > 1 时强制在文件名中拼上配置标签。
  */
 function writeResult(result: BenchResult, fileTag = '') {
-  const stamp = result.meta.timestamp.replace(/[:.]/g, '-')
+  const stamp = fileStamp(result.meta.timestamp)
   let path: string
   if (args.out) {
-    path = fileTag ? args.out.replace(/\.json$/i, '') + `-${fileTag}.json` : args.out
+    const configTag = configs.length > 1 ? configLabel(result.config) : ''
+    const tag = [configTag, fileTag].filter(Boolean).join('-')
+    path = tag ? args.out.replace(/\.json$/i, '') + `-${tag}.json` : args.out
   } else {
     const tag = fileTag ? `-${fileTag}` : ''
     path = join(RESULTS_DIR(), `${result.task}${tag}-${configLabel(result.config)}-${stamp}.json`)
@@ -156,6 +175,8 @@ for (const config of configs) {
       gitSha: sha,
       model: process.env.HF_MODEL ?? 'Bashaarat1/t5-small-arxiv-summarizer',
     })
+    // summary 走 HuggingFace 摘要模型，不经过 LLM 缓存，cacheMode 仅与其他任务的
+    // 结果结构保持口径统一，--no-cache 对 summary 无实际作用
     result.meta.cacheMode = args.useCache ? 'normal' : 'bypass'
     process.stdout.write(
       `  完成 ${result.meta.completed}/${result.meta.total}，失败 ${result.errors.length}\n`,
@@ -168,3 +189,12 @@ for (const config of configs) {
 process.stdout.write('\n')
 if (qaResults.length > 0) process.stdout.write(renderReport(qaResults) + '\n')
 if (summaryResults.length > 0) process.stdout.write(renderReport(summaryResults) + '\n')
+
+// 退出码语义：单样本失败是正常数据点（errors 记录后继续，exit 0）；
+// 整轮零完成（completed === 0 且 total > 0，典型为 API key 配错）是 harness 故障，
+// 报表照常输出后以 exit 1 告知 CI/脚本「跑完了但整轮无效」。
+// 多配置时任一配置 completed=0 即视为整轮失败；--compare 路径始终 exit 0。
+const allResults = [...qaResults, ...summaryResults]
+if (allResults.some((r) => r.meta.total > 0 && r.meta.completed === 0)) {
+  process.exit(1)
+}
