@@ -47,7 +47,7 @@ export async function loadConfigs(
   return expandMatrix(file)
 }
 
-/** 报表行标签与结果文件名用；剔除文件名非法字符（Windows 不允许文件名以点结尾）。 */
+/** 结果文件名用（报表行标签直接用配置名）；剔除文件名非法字符（Windows 不允许文件名以点结尾）。 */
 export function configLabel(config: BenchConfig): string {
   return config.name.replace(/[^\w.=,[\]-]/g, '_').replace(/[[\],=]/g, '.').replace(/\.+$/, '')
 }

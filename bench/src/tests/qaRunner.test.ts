@@ -151,6 +151,7 @@ describe('runQaTask', () => {
     const result = await runQaTask({ ...baseArgs, deps: deps as never })
 
     expect(result.meta.completed).toBe(0)
+    expect(result.meta.total).toBe(1)
     expect(result.errors).toHaveLength(1)
     expect(result.errors[0].stage).toBe('index')
   })
@@ -259,5 +260,37 @@ describe('runQaTask', () => {
     expect(result.metrics.evidenceRecall).toBe(1)
     expect(result.metrics.evidenceHitRate).toBe(1)
     expect(result.perSample[0].metrics.mrr).toBeUndefined()
+  })
+
+  it('单节点索引（无叶节点）时 leafCount 为 1 且不写 mrr', async () => {
+    // 建索引 fallback：tree.nodes 为空时树根自身就是叶（短篇论文的生产真实路径），
+    // 是「mrr 短路」与「leaves 口径」两条裁定的交汇点
+    const singleNode: IndexNode = leaf('root', 0, 3)
+    const deps = makeDeps({
+      buildIndex: vi.fn().mockResolvedValue(singleNode),
+      // 单叶短路语义：scoreAndSelect 不发 LLM 打分（llmCalled=false），
+      // 否则 mrr 不会被删、断言失败
+      runPipeline: vi.fn().mockResolvedValue({
+        answer: '8',
+        retrievals: [{
+          context: 'a\n\nb',
+          sources: ['Pages 1–3: Sroot'],
+          selected: [singleNode],
+          scores: [{ id: 0, score: 9 }],
+          degraded: false,
+          llmCalled: false,
+        }],
+        retrievalQuery: 'Q1?',
+        rewritten: false,
+        context: 'a\n\nb',
+        sources: ['Pages 1–3: Sroot'],
+        llmCalls: 1,
+      }),
+    })
+    const result = await runQaTask({ ...baseArgs, deps: deps as never })
+
+    expect(result.metrics.leafCount).toBe(1)
+    expect(result.metrics.mrr).toBeUndefined()          // 无排序可言，不写而非记 0
+    expect(result.metrics.evidenceRecall).toBeDefined() // 选中页覆盖与有无打分无关，照常写入
   })
 })

@@ -29,6 +29,7 @@ describe('runSummaryTask', () => {
     expect(result.metrics.rougeL).toBe(1)
     expect(result.metrics.emptyRate).toBe(0)
     expect(result.meta.completed).toBe(1)
+    expect(result.perSample[0].metrics).toHaveProperty('compressionRatio')
     expect(result.perSample[0].summary).toBe('the cat sat on the mat')
   })
 
@@ -56,6 +57,7 @@ describe('runSummaryTask', () => {
 
     expect(result.metrics.emptyRate).toBe(1)
     expect(result.metrics.rouge1).toBe(0)
+    expect(result.perSample[0].metrics).not.toHaveProperty('compressionRatio')
     expect(result.errors).toEqual([])
   })
 

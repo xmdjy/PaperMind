@@ -64,6 +64,20 @@ describe('renderReport', () => {
     expect(md).toContain('index')
   })
 
+  it('同配置同阶段的错误聚合为一行', () => {
+    const md = renderReport([
+      result('default', { evidenceRecall: 0.7 }, {
+        errors: [
+          { sampleId: 'a', stage: 'generate', message: 'timeout' },
+          { sampleId: 'b', stage: 'generate', message: 'timeout' },
+          { sampleId: 'c', stage: 'index', message: 'bad pdf' },
+        ],
+      }),
+    ])
+    expect(md).toContain('| default | generate | 2 | timeout |')
+    expect(md).toContain('| default | index | 1 | bad pdf |')
+  })
+
   it('空结果列表返回提示而非崩溃', () => {
     expect(renderReport([])).toContain('无结果')
   })
