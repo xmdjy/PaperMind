@@ -80,6 +80,8 @@ export interface BenchResult {
     total: number
     /** unanswerableAccuracy 的判定口径，避免两种口径的数字被混着对比 */
     unanswerableMethod?: 'pattern' | 'judge'
+    /** 缓存模式：normal 读写缓存；bypass（--no-cache）只跳过读，不覆写已有缓存文件 */
+    cacheMode?: 'normal' | 'bypass'
   }
   metrics: Record<string, number>
   perSample: PerSampleRecord[]
