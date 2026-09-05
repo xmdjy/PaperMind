@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest'
 import type { PerSampleRecord } from '../types'
-import { mean, percentile, aggregate, withLatencyStats } from '../metrics/aggregate'
+import { mean, percentile, aggregate, withLatencyStats, withPercentiles } from '../metrics/aggregate'
 
 function rec(id: string, metrics: Record<string, number>): PerSampleRecord {
   return { id, paperId: 'p', source: 'qasper', metrics }
@@ -105,5 +105,53 @@ describe('withLatencyStats', () => {
     const out = withLatencyStats({}, [])
     expect(out.latencyP50).toBe(0)
     expect(out.latencyP95).toBe(0)
+  })
+
+  it('追加 llmNetworkLatencyP50Ms/P95Ms，值与既有 latency 字段一致', () => {
+    const out = withLatencyStats({}, [120, 340])
+    expect(out.llmNetworkLatencyP50Ms).toBe(120)
+    expect(out.llmNetworkLatencyP95Ms).toBe(340)
+    expect(out.latencyP50).toBe(out.llmNetworkLatencyP50Ms)
+    expect(out.latencyP95).toBe(out.llmNetworkLatencyP95Ms)
+  })
+
+  it('无网络请求时不产生 llmNetworkLatency Ms 字段（而非记 0）', () => {
+    const out = withLatencyStats({}, [])
+    expect('llmNetworkLatencyP50Ms' in out).toBe(false)
+    expect('llmNetworkLatencyP95Ms' in out).toBe(false)
+  })
+
+  it('负延迟被过滤，不与合法值混算', () => {
+    const out = withLatencyStats({}, [100, -5, 300])
+    expect(out.llmNetworkLatencyP50Ms).toBe(100)
+  })
+})
+
+describe('withPercentiles', () => {
+  it('为每个前缀生成 P50Ms / P95Ms', () => {
+    const out = withPercentiles({}, { retrievalLatency: [100, 200, 300] })
+    expect(out.retrievalLatencyP50Ms).toBe(200)
+    expect(out.retrievalLatencyP95Ms).toBe(300)
+  })
+
+  it('空数组不产生字段，而非写 0', () => {
+    const out = withPercentiles({}, { retrievalLatency: [] })
+    expect('retrievalLatencyP50Ms' in out).toBe(false)
+    expect('retrievalLatencyP95Ms' in out).toBe(false)
+  })
+
+  it('负数与 NaN 被过滤，不产生字段或污染合法值', () => {
+    const out = withPercentiles({}, {
+      a: [100, NaN, -1, Infinity],
+      b: [NaN, -5],
+    })
+    expect(out.aP50Ms).toBe(100)
+    expect('bP50Ms' in out).toBe(false)
+  })
+
+  it('保留原有指标并追加分位数', () => {
+    const out = withPercentiles({ answerF1: 0.5 }, { retrievalLatency: [10, 20] })
+    expect(out.answerF1).toBe(0.5)
+    expect(out.retrievalLatencyP50Ms).toBe(10)
   })
 })
