@@ -149,3 +149,85 @@ describe('runRagPipeline', () => {
     expect(result.context).toContain('---')
   })
 })
+
+describe('runRagPipeline timing', () => {
+  /** 注入脚本化时钟：返回预设时间序列，用尽后保持末值，与 Math.max(0, …) 钳制兼容。 */
+  function scriptedClock(ts: number[]): () => number {
+    let i = 0
+    return () => (i < ts.length ? ts[i++] : ts[ts.length - 1])
+  }
+
+  it('无历史 + 单叶检索：rewrite 为 0，retrieval/generation/总时长精确符合时钟差', async () => {
+    const llm = vi.fn()
+    const generate = vi.fn().mockResolvedValue('answer')
+
+    // pipeline 起点 → 检索起点 → 检索完成 → 生成起点 → 生成完成 → 结束
+    const now = scriptedClock([100, 100, 140, 140, 190, 190])
+    const result = await runRagPipeline(
+      [{ tree: singleLeafTree, pages }], 'q', [], llm, generate, 'sys', {},
+      { now },
+    )
+
+    expect(result.timing.queryRewriteLatencyMs).toBe(0)
+    expect(result.timing.retrievalLatencyMs).toBe(40)
+    expect(result.timing.answerGenerationLatencyMs).toBe(50)
+    expect(result.timing.queryEndToEndLatencyMs).toBe(90)
+  })
+
+  it('有历史触发 rewrite：rewrite 时长独立计入，retrieval 覆盖 rewrite + 评分 + 上下文', async () => {
+    const llm = vi.fn()
+      .mockResolvedValueOnce('自注意力机制的定义')          // rewriteQuery
+      .mockResolvedValueOnce('[{"id":0,"score":9},{"id":1,"score":2}]') // scoreAndSelect
+    const generate = vi.fn().mockResolvedValue('answer')
+
+    // 起点 → 检索起点 → 改写起点 → 改写完成 → 检索完成 → 生成起点 → 生成完成 → 结束
+    const now = scriptedClock([100, 100, 100, 130, 150, 150, 220, 220])
+    const result = await runRagPipeline(
+      [{ tree: multiLeafTree, pages }],
+      '它的定义是什么',
+      [{ role: 'user', content: '讲讲 transformer' }, { role: 'assistant', content: '好的' }],
+      llm, generate, 'sys', {}, { now },
+    )
+
+    expect(result.rewritten).toBe(true)
+    expect(result.timing.queryRewriteLatencyMs).toBe(30)
+    // 检索起点在改写之前：rewrite + 评分 + 上下文处理 = 150 - 100
+    expect(result.timing.retrievalLatencyMs).toBe(50)
+    expect(result.timing.answerGenerationLatencyMs).toBe(70)
+    expect(result.timing.queryEndToEndLatencyMs).toBe(120)
+  })
+
+  it('externalContext：不调用评分，仍返回有限且非负的 retrieval 与总时长', async () => {
+    const llm = vi.fn()
+    const generate = vi.fn().mockResolvedValue('answer')
+
+    // 起点 → 检索起点 → 检索完成（仅本地上下文准备）→ 生成起点 → 生成完成 → 结束
+    const now = scriptedClock([100, 100, 105, 105, 155, 155])
+    const result = await runRagPipeline(
+      [{ tree: multiLeafTree, pages }], '解释这段',
+      [{ role: 'user', content: 'a' }, { role: 'assistant', content: 'b' }],
+      llm, generate, 'sys', { externalContext: '用户划选的原文' }, { now },
+    )
+
+    expect(llm).not.toHaveBeenCalled()
+    expect(result.timing.retrievalLatencyMs).toBe(5)
+    expect(result.timing.answerGenerationLatencyMs).toBe(50)
+    expect(result.timing.queryEndToEndLatencyMs).toBe(55)
+    for (const v of Object.values(result.timing)) {
+      expect(Number.isFinite(v)).toBe(true)
+      expect(v).toBeGreaterThanOrEqual(0)
+    }
+  })
+
+  it('生成失败：保留抛错行为，不返回伪 timing 结果', async () => {
+    const llm = vi.fn()
+    const generate = vi.fn().mockRejectedValue(new Error('upstream down'))
+
+    await expect(
+      runRagPipeline(
+        [{ tree: singleLeafTree, pages }], 'q', [], llm, generate, 'sys', {},
+        { now: scriptedClock([100, 100, 140]) },
+      ),
+    ).rejects.toThrow('upstream down')
+  })
+})

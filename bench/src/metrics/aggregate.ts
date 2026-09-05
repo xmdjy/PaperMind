@@ -44,13 +44,44 @@ export function metricSampleCounts(records: PerSampleRecord[]): Record<string, n
   return counts
 }
 
+/**
+ * 兼容包装：输出既有 latencyP50/P95（deprecated，下一发布周期删除，空数组仍记 0 与历史契约一致），
+ * 再追加 llmNetworkLatencyP50Ms/P95Ms 让口径以 Ms 后缀字段为准；网络无真实请求时不产生 Ms 字段，
+ * 由报表以「—」展示，防止 0 ms 被误读为极速完成。
+ */
 export function withLatencyStats(
   metrics: Record<string, number>,
   latencies: number[],
 ): Record<string, number> {
+  const clean = latencies.filter(v => Number.isFinite(v) && v >= 0)
   return {
     ...metrics,
-    latencyP50: percentile(latencies, 50),
-    latencyP95: percentile(latencies, 95),
+    latencyP50: percentile(clean, 50),
+    latencyP95: percentile(clean, 95),
+    ...(clean.length > 0
+      ? {
+          llmNetworkLatencyP50Ms: percentile(clean, 50),
+          llmNetworkLatencyP95Ms: percentile(clean, 95),
+        }
+      : {}),
   }
+}
+
+/**
+ * 为每个时延前缀生成 P50/P95（最近秩法），输出 `${key}P50Ms` / `${key}P95Ms`。
+ * - 过滤非有限数与负数；
+ * - 空数组不产生字段（而非写 0），让报表能显示「—」，防止 0 ms 被误读为极速完成。
+ */
+export function withPercentiles(
+  metrics: Record<string, number>,
+  values: Record<string, number[]>,
+): Record<string, number> {
+  const out = { ...metrics }
+  for (const [key, list] of Object.entries(values)) {
+    const clean = list.filter(v => Number.isFinite(v) && v >= 0)
+    if (clean.length === 0) continue
+    out[`${key}P50Ms`] = percentile(clean, 50)
+    out[`${key}P95Ms`] = percentile(clean, 95)
+  }
+  return out
 }

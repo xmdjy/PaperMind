@@ -159,6 +159,9 @@ for (const config of configs) {
       })
       // --no-cache 当前只跳过读缓存，不覆写已有缓存文件（llmClient 待后续优化），如实记录口径
       result.meta.cacheMode = args.useCache ? 'normal' : 'bypass'
+      // 缓存计数来自主 RAG client（meta.cacheHits/cacheMisses 在 runQaTask 内统计），
+      // 不含 judgeClient——启用 --judge 时明确标注，避免被误读为整轮全部 LLM 流量
+      if (args.judge) result.meta.cacheScope = 'rag'
 
       const { hits, misses } = client.stats()
       process.stdout.write(

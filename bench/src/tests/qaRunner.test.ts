@@ -35,6 +35,15 @@ const fakeClient = {
   chat: vi.fn(),
   stats: () => ({ hits: 0, misses: 0 }),
   latencies: () => [120, 340],
+  requestTimings: () => [],
+}
+
+/** 生产 timing 字段的最小值，供 pipeline mock 返回。 */
+const baseTiming = {
+  queryRewriteLatencyMs: 0,
+  retrievalLatencyMs: 20,
+  answerGenerationLatencyMs: 30,
+  queryEndToEndLatencyMs: 50,
 }
 
 function makeDeps(overrides: Record<string, unknown> = {}) {
@@ -55,10 +64,12 @@ function makeDeps(overrides: Record<string, unknown> = {}) {
       context: 'CONTEXT_MARKER_9c2e',
       sources: ['Pages 1–2: S0'],
       llmCalls: 2,
+      timing: { ...baseTiming },
     }),
     ...overrides,
   }
 }
+
 
 const baseArgs = {
   samples: [sample],
@@ -129,7 +140,7 @@ describe('runQaTask', () => {
         .mockRejectedValueOnce(new Error('network timeout'))
         .mockResolvedValueOnce({
           answer: '9', retrievals: [], retrievalQuery: 'Q2?', rewritten: false,
-          context: '', sources: [], llmCalls: 1,
+          context: '', sources: [], llmCalls: 1, timing: { ...baseTiming },
         }),
     })
     const twoQuestions: EvalSample = {
@@ -163,7 +174,7 @@ describe('runQaTask', () => {
       runPipeline: vi.fn().mockResolvedValue({
         answer: '参考内容中没有提到这一点。',
         retrievals: [], retrievalQuery: 'Q?', rewritten: false,
-        context: '', sources: [], llmCalls: 1,
+        context: '', sources: [], llmCalls: 1, timing: { ...baseTiming },
       }),
     })
     const unanswerableSample: EvalSample = {
@@ -182,7 +193,7 @@ describe('runQaTask', () => {
       runPipeline: vi.fn().mockResolvedValue({
         answer: '论文中使用了 8 个注意力头。',
         retrievals: [], retrievalQuery: 'Q?', rewritten: false,
-        context: '', sources: [], llmCalls: 1,
+        context: '', sources: [], llmCalls: 1, timing: { ...baseTiming },
       }),
     })
     const unanswerableSample: EvalSample = {
@@ -254,6 +265,7 @@ describe('runQaTask', () => {
         context: 'a\n\nb',
         sources: ['Pages 1–2: S0'],
         llmCalls: 1,
+        timing: { ...baseTiming },
       }),
     })
     const result = await runQaTask({ ...baseArgs, deps: deps as never })
@@ -287,6 +299,7 @@ describe('runQaTask', () => {
         context: 'a\n\nb',
         sources: ['Pages 1–3: Sroot'],
         llmCalls: 1,
+        timing: { ...baseTiming },
       }),
     })
     const result = await runQaTask({ ...baseArgs, deps: deps as never })
@@ -328,7 +341,149 @@ describe('runQaTask', () => {
     expect(result.meta.evidenceMappingCoverage).toBe(0.5)
     expect(result.meta.unmappedEvidenceRate).toBe(0.5)
   })
+
+  it('perPaper 记录索引时长、问题数、cache 差值与 leafCount', async () => {
+    // 注入脚本化时钟：runStartedMs → indexStartedMs → indexFinishedMs → questionStartedMs → 结束
+    // 默认单样本单问题，now() 恰好调用 5 次
+    const now = scriptedClock([100, 100, 250, 300, 500])
+    const result = await runQaTask({ ...baseArgs, now, deps: makeDeps() as never })
+
+    expect(result.perPaper).toHaveLength(1)
+    const p = result.perPaper![0]
+    expect(p.paperId).toBe('p1')
+    expect(p.source).toBe('qasper')
+    expect(p.pageCount).toBe(4)
+    expect(p.questionCount).toBe(1)
+    expect(p.indexBuildLatencyMs).toBe(150)
+    expect(p.leafCount).toBe(2)
+    // fakeClient.stats() 恒为 {hits:0, misses:0}，索引前后差值即 0
+    expect(p.indexLlmCalls).toBe(0)
+    expect(p.indexCacheHits).toBe(0)
+    expect(p.indexCacheMisses).toBe(0)
+    expect(p.error).toBeUndefined()
+  })
+
+  it('每个成功 perSample 都有四个非负 timing 字段', async () => {
+    const result = await runQaTask({ ...baseArgs, deps: makeDeps() as never })
+
+    expect(result.perSample).toHaveLength(1)
+    const t = result.perSample[0].timing
+    expect(t).toBeDefined()
+    expect(t).toMatchObject({
+      queryRewriteLatencyMs: 0,
+      retrievalLatencyMs: 20,
+      answerGenerationLatencyMs: 30,
+      queryEndToEndLatencyMs: 50,
+    })
+    for (const v of Object.values(t!)) {
+      expect(Number.isFinite(v)).toBe(true)
+      expect(v).toBeGreaterThanOrEqual(0)
+    }
+  })
+
+  it('metrics 正确生成 index/retrieval/generation/end-to-end 的 P50/P95', async () => {
+    const now = scriptedClock([100, 100, 250, 300, 500])
+    const result = await runQaTask({ ...baseArgs, now, deps: makeDeps() as never })
+
+    // index 单值 150；retrieval 20 / generation 30 / e2e 50 来自 mock timing
+    expect(result.metrics.indexBuildLatencyP50Ms).toBe(150)
+    expect(result.metrics.indexBuildLatencyP95Ms).toBe(150)
+    expect(result.metrics.retrievalLatencyP50Ms).toBe(20)
+    expect(result.metrics.retrievalLatencyP95Ms).toBe(20)
+    expect(result.metrics.answerGenerationLatencyP50Ms).toBe(30)
+    expect(result.metrics.answerGenerationLatencyP95Ms).toBe(30)
+    expect(result.metrics.queryEndToEndLatencyP50Ms).toBe(50)
+    expect(result.metrics.queryEndToEndLatencyP95Ms).toBe(50)
+    // 均值侧同样存在（aggregate 产生），供报表均值列展示
+    expect(result.metrics.queryEndToEndLatencyMs).toBe(50)
+  })
+
+  it('索引失败仍记录已消耗的索引时长与缓存差值，但不能生成题目时延', async () => {
+    // 注入脚本化时钟：runStartedMs → indexStartedMs → indexFinishedMs（catch 内）→ runWallClockMs
+    const now = scriptedClock([100, 100, 250, 400])
+    const deps = makeDeps({ buildIndex: vi.fn().mockRejectedValue(new Error('bad pdf')) })
+    const result = await runQaTask({ ...baseArgs, now, deps: deps as never })
+
+    expect(result.perPaper).toHaveLength(1)
+    const p = result.perPaper![0]
+    expect(p.error).toContain('bad pdf')
+    // 失败论文的索引时长不能被时延分析漏掉——「索引慢后失败」的成本同样要可诊断
+    expect(p.indexBuildLatencyMs).toBe(150)
+    // fakeClient.stats() 恒为 {hits:0, misses:0}，索引前后差值即 0
+    expect(p.indexLlmCalls).toBe(0)
+    expect(p.indexCacheHits).toBe(0)
+    expect(p.indexCacheMisses).toBe(0)
+    // 失败后没有树结构，leafCount 仍不写
+    expect(p.leafCount).toBeUndefined()
+    expect(result.perSample).toHaveLength(0)
+    // 失败样本不得伪造题目时延：无完成题则检索/生成/端到端分位数不产生
+    expect(result.metrics.retrievalLatencyP50Ms).toBeUndefined()
+    expect(result.metrics.queryEndToEndLatencyP50Ms).toBeUndefined()
+    // 但已记录的索引时长进入聚合
+    expect(result.metrics.indexBuildLatencyP50Ms).toBe(150)
+    expect(result.metrics.indexBuildLatencyP95Ms).toBe(150)
+  })
+
+  it('meta 记录 startedAt/finishedAt/runWallClockMs/缓存计数，零请求时 cacheHitRate 为 0', async () => {
+    const now = scriptedClock([100, 100, 250, 300, 500])
+    const result = await runQaTask({ ...baseArgs, now, deps: makeDeps() as never })
+
+    expect(result.meta.startedAt).toBeDefined()
+    expect(result.meta.finishedAt).toBe(result.meta.timestamp)
+    expect(new Date(result.meta.startedAt!).getTime()).toBeLessThanOrEqual(new Date(result.meta.finishedAt!).getTime())
+    expect(result.meta.runWallClockMs).toBe(400)
+    expect(result.meta.cacheHits).toBe(0)
+    expect(result.meta.cacheMisses).toBe(0)
+    expect(result.meta.cacheHitRate).toBe(0)
+  })
+
+  it('latencyP50/P95 与 llmNetworkLatencyP50Ms/P95Ms 相等', async () => {
+    const result = await runQaTask({ ...baseArgs, deps: makeDeps() as never })
+
+    // 最近秩法 p50：percentile([120, 340], 50) = ceil(0.5*2)-1 = 0 → 120（340 是 p95）
+    expect(result.metrics.latencyP50).toBe(120)
+    expect(result.metrics.latencyP95).toBe(340)
+    expect(result.metrics.llmNetworkLatencyP50Ms).toBe(120)
+    expect(result.metrics.llmNetworkLatencyP95Ms).toBe(340)
+    expect(result.metrics.llmNetworkLatencyP50Ms).toBe(result.metrics.latencyP50)
+    expect(result.metrics.llmNetworkLatencyP95Ms).toBe(result.metrics.latencyP95)
+  })
+
+  it('pipeline 完全缺失 timing 时抛错，不把缺 timing 的题静默当成功样本', async () => {
+    const deps = makeDeps({
+      runPipeline: vi.fn().mockResolvedValue({
+        answer: '8', retrievals: [], retrievalQuery: 'Q?', rewritten: false,
+        context: '', sources: [], llmCalls: 1,
+      }),
+    })
+    await expect(runQaTask({ ...baseArgs, deps: deps as never })).rejects.toThrow(/timing/)
+  })
+
+  it('pipeline 任一时延字段为负或非有限时抛错，不伪造成功', async () => {
+    // 四个字段逐个覆盖：负值、NaN、Infinity 均应触发不变量破坏
+    const badTimings = [
+      { ...baseTiming, queryRewriteLatencyMs: -1 },
+      { ...baseTiming, retrievalLatencyMs: NaN },
+      { ...baseTiming, answerGenerationLatencyMs: Infinity },
+      { ...baseTiming, queryEndToEndLatencyMs: -5 },
+    ]
+    for (const timing of badTimings) {
+      const deps = makeDeps({
+        runPipeline: vi.fn().mockResolvedValue({
+          answer: '8', retrievals: [], retrievalQuery: 'Q?', rewritten: false,
+          context: '', sources: [], llmCalls: 1, timing,
+        }),
+      })
+      await expect(runQaTask({ ...baseArgs, deps: deps as never })).rejects.toThrow(/timing/)
+    }
+  })
 })
+
+/** 注入脚本化时钟：返回预设时间序列，用尽后保持末值（配合 Math.max(0,…) 钳制）。 */
+function scriptedClock(ts: number[]): () => number {
+  let i = 0
+  return () => (i < ts.length ? ts[i++] : ts[ts.length - 1])
+}
 
 describe('runQaTask + judge', () => {
   const judgeClient = {
@@ -391,7 +546,7 @@ describe('runQaTask + judge', () => {
     const deps = makeDeps({
       runPipeline: vi.fn().mockResolvedValue({
         answer: '无从判断', retrievals: [], retrievalQuery: 'Q?', rewritten: false,
-        context: '', sources: [], llmCalls: 1,
+        context: '', sources: [], llmCalls: 1, timing: { ...baseTiming },
       }),
     })
     const unanswerableSample: EvalSample = {
