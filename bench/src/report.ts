@@ -14,6 +14,21 @@ function fmt(value: number): string {
     : value.toFixed(3)
 }
 
+/** 命中率百分比：31.7% → '31.7%'（保留 1 位小数，去尾零）。 */
+function fmtPct(rate: number): string {
+  return `${(rate * 100).toFixed(1).replace(/\.0$/, '')}%`
+}
+
+/** 时长格式化：< 1000 显示 N ms；< 60_000 显示 x.xx s；否则显示 Xm Ys。 */
+export function fmtDuration(ms: number): string {
+  if (!Number.isFinite(ms) || ms < 0) return '—'
+  if (ms < 1000) return `${Math.round(ms)} ms`
+  if (ms < 60_000) return `${(ms / 1000).toFixed(2)} s`
+  const minutes = Math.floor(ms / 60_000)
+  const seconds = Math.round((ms % 60_000) / 1000)
+  return `${minutes}m ${seconds}s`
+}
+
 function collectMetricNames(results: BenchResult[]): string[] {
   const names = new Set<string>()
   for (const r of results) for (const k of Object.keys(r.metrics)) names.add(k)
@@ -83,6 +98,9 @@ export function renderReport(
   }
   lines.push('')
 
+  const timingBlock = renderTimingSection(results)
+  if (timingBlock.length > 0) lines.push(...timingBlock, '')
+
   lines.push(`| 配置 | 完成 | ${metricNames.join(' | ')} |`)
   lines.push(`| --- | --- | ${metricNames.map(() => '---').join(' | ')} |`)
   results.forEach((r, i) => {
@@ -133,6 +151,44 @@ function renderErrors(results: BenchResult[]): string[] {
   return lines
 }
 
+/**
+ * 「耗时与缓存」区块：单结果与矩阵结果都必须输出。
+ * 字段缺失或无完成题时渲染「—」，防止 0 ms 被误读为极速完成。
+ */
+function renderTimingSection(results: BenchResult[]): string[] {
+  // 仅 QA 结果带时延元数据；summary 任务（HF 摘要）不适用，跳过区块
+  if (!results.some(r => r.meta.startedAt && r.meta.finishedAt)) return []
+
+  const lines: string[] = []
+  lines.push('### 耗时与缓存')
+  lines.push('')
+
+  for (const r of results) {
+    if (!r.meta.startedAt || !r.meta.finishedAt) continue
+    const requests = (r.meta.cacheHits ?? 0) + (r.meta.cacheMisses ?? 0)
+    const hitRate = r.meta.cacheHitRate
+    const scopeLabel = r.meta.cacheScope === 'rag' ? 'RAG 缓存' : '缓存'
+    lines.push(`- **${r.config.name}**：运行区间 ${r.meta.startedAt} → ${r.meta.finishedAt}，整轮 wall-clock ${r.meta.runWallClockMs === undefined ? '—' : fmtDuration(r.meta.runWallClockMs!)}，${scopeLabel} ${r.meta.cacheHits ?? 0} hits / ${requests} requests（${hitRate === undefined ? '—' : fmtPct(hitRate)}）`)
+  }
+
+  lines.push('')
+  lines.push('| 配置 | 索引 P50/P95 | 检索 P50/P95 | 生成 P50/P95 | 单题端到端 P50/P95 | LLM 网络 P50/P95 |')
+  lines.push('| --- | --- | --- | --- | --- | --- |')
+  for (const r of results) {
+    // 无完成题或字段缺失时 cell 渲染「—」，防止 0 ms 被误读为极速完成
+    lines.push(`| ${r.config.name} | ${cell(r.metrics, 'indexBuildLatency')} | ${cell(r.metrics, 'retrievalLatency')} | ${cell(r.metrics, 'answerGenerationLatency')} | ${cell(r.metrics, 'queryEndToEndLatency')} | ${cell(r.metrics, 'llmNetworkLatency')} |`)
+  }
+  return lines
+}
+
+/** 取 `${prefix}P50Ms/P95Ms` 两个字段渲染为 `P50 / P95` 形态；缺失时输出「—」。 */
+function cell(metrics: Record<string, number>, prefix: string): string {
+  const p50 = metrics[`${prefix}P50Ms`]
+  const p95 = metrics[`${prefix}P95Ms`]
+  if (p50 === undefined || p95 === undefined) return '—'
+  return `${fmtDuration(p50)} / ${fmtDuration(p95)}`
+}
+
 export function renderComparison(a: BenchResult, b: BenchResult): string {
   const names = collectMetricNames([a, b])
   const lines: string[] = []
@@ -151,6 +207,8 @@ export function renderComparison(a: BenchResult, b: BenchResult): string {
       : '—'
     lines.push(`| ${name} | ${va !== undefined ? fmt(va) : '—'} | ${vb !== undefined ? fmt(vb) : '—'} | ${delta} |`)
   }
+  lines.push('')
+  lines.push('> 时延字段（`*Latency*Ms`）越低越好，其余质量指标越高越好。')
   lines.push('')
   return lines.join('\n')
 }

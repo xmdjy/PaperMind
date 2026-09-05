@@ -127,6 +127,60 @@ describe('createLlmClient 缓存', () => {
     expect(client.latencies()).toHaveLength(1)
   })
 
+  it('miss 记录 cacheHit=false、有限 elapsedMs 与 networkLatencyMs，latencies 仅含 miss', async () => {
+    const fetchImpl = vi.fn().mockResolvedValue(okResponse('answer'))
+    const client = createLlmClient({
+      provider: 'openai', model: 'm', apiKey: 'k', baseUrl: 'http://x/v1',
+      cacheDir, fetchImpl: fetchImpl as unknown as typeof fetch,
+    })
+
+    await client.complete('a')
+    const timings = client.requestTimings()
+
+    expect(timings).toHaveLength(1)
+    expect(timings[0].cacheHit).toBe(false)
+    expect(Number.isFinite(timings[0].elapsedMs)).toBe(true)
+    expect(timings[0].elapsedMs).toBeGreaterThanOrEqual(0)
+    expect(Number.isFinite(timings[0].networkLatencyMs)).toBe(true)
+    // elapsed 覆盖缓存/请求调度与网络，必不小于纯网络延迟
+    expect(timings[0].elapsedMs!).toBeGreaterThanOrEqual(timings[0].networkLatencyMs!)
+    expect(client.latencies()).toEqual([timings[0].networkLatencyMs])
+  })
+
+  it('命中同一缓存第二次调用记录 cacheHit=true，且 latencies 长度不增加', async () => {
+    const fetchImpl = vi.fn().mockResolvedValue(okResponse('answer'))
+    const client = createLlmClient({
+      provider: 'openai', model: 'm', apiKey: 'k', baseUrl: 'http://x/v1',
+      cacheDir, fetchImpl: fetchImpl as unknown as typeof fetch,
+    })
+
+    await client.complete('a')
+    await client.complete('a')
+    const timings = client.requestTimings()
+
+    expect(timings).toHaveLength(2)
+    expect(timings[1].cacheHit).toBe(true)
+    expect(timings[1].networkLatencyMs).toBeUndefined()
+    expect(Number.isFinite(timings[1].elapsedMs)).toBe(true)
+    expect(client.latencies()).toHaveLength(1)
+  })
+
+  it('HTTP 失败计入 miss 但不生成成功网络 latency 记录', async () => {
+    const fetchImpl = vi.fn().mockResolvedValue({
+      ok: false, status: 503, text: async () => 'overloaded',
+    } as unknown as Response)
+    const client = createLlmClient({
+      provider: 'openai', model: 'm', apiKey: 'k', baseUrl: 'http://x/v1',
+      cacheDir, fetchImpl: fetchImpl as unknown as typeof fetch,
+    })
+
+    await expect(client.complete('hello')).rejects.toThrow(/503/)
+
+    expect(client.stats()).toEqual({ hits: 0, misses: 1 })
+    expect(client.latencies()).toEqual([])
+    expect(client.requestTimings()).toEqual([])
+  })
+
   it('HTTP 200 但 choices[0].message.content 缺失时抛错且不写缓存', async () => {
     const fetchImpl = vi.fn().mockResolvedValue({
       ok: true, json: async () => ({ error: { message: 'content_filter' } }),

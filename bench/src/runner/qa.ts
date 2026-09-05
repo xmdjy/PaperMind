@@ -6,12 +6,12 @@
  */
 import { buildPageIndex, type IndexNode, type IndexOptions } from '../../../src/utils/pageIndex'
 import { runRagPipeline, type RagOptions } from '../../../src/utils/ragPipeline'
-import type { BenchConfig, BenchResult, EvalSample, PerSampleRecord, SampleError } from '../types'
+import type { BenchConfig, BenchResult, EvalSample, PaperTimingRecord, PerSampleRecord, SampleError } from '../types'
 import type { LlmClient } from '../llmClient'
 import { computeRetrievalMetrics, estimateTokens, expandPages } from '../metrics/retrieval'
 import { answerF1, isRefusal, REFUSAL_PATTERN_VERSION } from '../metrics/answerF1'
 import { judgeAnswer, judgeUnanswerable } from '../metrics/judge'
-import { aggregate, metricSampleCounts, withLatencyStats } from '../metrics/aggregate'
+import { aggregate, metricSampleCounts, withLatencyStats, withPercentiles } from '../metrics/aggregate'
 
 /** 与 src/stores/chat.ts 的 DEFAULT_PROFILE.systemPrompt 保持一致的字面值。 */
 export const DEFAULT_SYSTEM_PROMPT =
@@ -39,6 +39,8 @@ export interface QaTaskArgs {
   /** 提供时启用 LLM-as-judge；通常与 client 用不同模型 */
   judgeClient?: LlmClient
   judgeModel?: string
+  /** 测试注入单调时钟；生产默认 Date.now */
+  now?: () => number
   /** 注入替换生产实现，单测无需真实 LLM */
   deps?: QaTaskDeps
 }
@@ -69,6 +71,9 @@ function errorMessage(e: unknown): string {
 
 export async function runQaTask(args: QaTaskArgs): Promise<BenchResult> {
   const { samples, config, client, limit, gitSha, model } = args
+  const now = args.now ?? Date.now
+  const startedAt = new Date().toISOString()
+  const runStartedMs = now()
   const buildIndex = args.deps?.buildIndex ?? buildPageIndex
   const runPipeline = args.deps?.runPipeline ?? runRagPipeline
   // 语言覆盖指令追加在调用方 systemPrompt 之后；未传时 prompt 原样透传
@@ -77,6 +82,7 @@ export async function runQaTask(args: QaTaskArgs): Promise<BenchResult> {
     : args.systemPrompt
 
   const perSample: PerSampleRecord[] = []
+  const perPaper: PaperTimingRecord[] = []
   const errors: SampleError[] = []
   let total = 0
   let sawUnanswerable = false
@@ -92,21 +98,58 @@ export async function runQaTask(args: QaTaskArgs): Promise<BenchResult> {
 
     // 每篇论文只建一次索引，同篇的多个问题复用
     let tree: IndexNode
+    const indexClientBefore = client.stats()
+    const indexStartedMs = now()
     try {
       tree = await buildIndex(sample.pages, client.complete, indexOptions(config))
     } catch (e) {
-      // 建索引失败：该论文全部问题按 index 阶段记错，不静默跳过
-      for (const q of sample.questions) {
-        if (limit !== undefined && total >= limit) break
-        total++
-        errors.push({ sampleId: q.id, stage: 'index', message: errorMessage(e) })
+      // 建索引失败：该论文全部问题按 index 阶段记错，不静默跳过。
+      // 仍记录已消耗的索引时长与缓存差值——「索引慢后失败」的论文不能被时延分析漏掉，
+      // 否则首次索引的真实成本在故障样本上完全不可见
+      const indexFinishedMs = now()
+      const indexClientAfter = client.stats()
+      const questionCount = countExecutedQuestions(sample, limit, total)
+      total += questionCount
+      for (let i = 0; i < questionCount; i++) {
+        errors.push({ sampleId: sample.questions[i].id, stage: 'index', message: errorMessage(e) })
       }
+      perPaper.push({
+        paperId: sample.paperId,
+        source: sample.source,
+        pageCount: sample.pages.length,
+        questionCount,
+        indexBuildLatencyMs: Math.max(0, indexFinishedMs - indexStartedMs),
+        indexLlmCalls:
+          (indexClientAfter.hits - indexClientBefore.hits)
+          + (indexClientAfter.misses - indexClientBefore.misses),
+        indexCacheHits: indexClientAfter.hits - indexClientBefore.hits,
+        indexCacheMisses: indexClientAfter.misses - indexClientBefore.misses,
+        error: errorMessage(e),
+      })
       continue
     }
-
-    // 复刻生产口径：单节点文档（buildPageIndex 直接返回叶子）时叶节点是树本身，
+    const indexFinishedMs = now()
+    const indexClientAfter = client.stats()
+    // 单节点文档（buildPageIndex 直接返回叶子）时叶节点是树本身，
     // 传空数组会让 mrr 静默变 0
     const leaves = tree.nodes.length > 0 ? tree.nodes : [tree]
+
+    // questionCount 为本篇在 limit 约束下实际将执行的问题数，而不是原始总数
+    const paperQuestionCount = countExecutedQuestions(sample, limit, total)
+    perPaper.push({
+      paperId: sample.paperId,
+      source: sample.source,
+      pageCount: sample.pages.length,
+      questionCount: paperQuestionCount,
+      indexBuildLatencyMs: Math.max(0, indexFinishedMs - indexStartedMs),
+      // LLM 调用数 = 网络请求 + 缓存命中（buildPageIndex 的每叶 summarize + 根索引一次）
+      indexLlmCalls:
+        (indexClientAfter.hits - indexClientBefore.hits)
+        + (indexClientAfter.misses - indexClientBefore.misses),
+      indexCacheHits: indexClientAfter.hits - indexClientBefore.hits,
+      indexCacheMisses: indexClientAfter.misses - indexClientBefore.misses,
+      leafCount: leaves.length,
+    })
 
     for (const question of sample.questions) {
       if (limit !== undefined && total >= limit) break
@@ -121,6 +164,7 @@ export async function runQaTask(args: QaTaskArgs): Promise<BenchResult> {
       // 生产 scoreAndSelect 对野值打分可能在 try 块外抛 TypeError，
       // 这里必须 catch 一切异常——单个坏样本不能终止整轮评测
       try {
+        const questionStartedMs = now()
         const result = await runPipeline(
           [{ tree, pages: sample.pages }],
           question.question,
@@ -129,6 +173,7 @@ export async function runQaTask(args: QaTaskArgs): Promise<BenchResult> {
           client.chat,
           systemPrompt,
           ragOptions(config),
+          { now },
         )
 
         const retrieval = result.retrievals[0]
@@ -208,29 +253,61 @@ export async function runQaTask(args: QaTaskArgs): Promise<BenchResult> {
           }
         }
 
+        const { timing } = result
+        // 时延不变量：timing 必须存在，且四个字段均为有限非负数。
+        // 缺失或非法是评测口径漂移（生产 pipeline 与评测契约不一致），而非样本失败，
+        // 直接抛 TimingInvariantViolation 让整轮失效——绝不能把缺 timing 的题静默当成功样本，
+        // 否则后续分位数会静默基于部分成功题计算
+        if (
+          !timing
+          || !Number.isFinite(timing.queryRewriteLatencyMs) || timing.queryRewriteLatencyMs < 0
+          || !Number.isFinite(timing.retrievalLatencyMs) || timing.retrievalLatencyMs < 0
+          || !Number.isFinite(timing.answerGenerationLatencyMs) || timing.answerGenerationLatencyMs < 0
+          || !Number.isFinite(timing.queryEndToEndLatencyMs) || timing.queryEndToEndLatencyMs < 0
+        ) {
+          throw new TimingInvariantViolation()
+        }
+
         perSample.push({
           id: question.id,
           paperId: sample.paperId,
           source: sample.source,
           metrics,
+          timing: { ...timing },
           retrievalQuery: result.retrievalQuery,
           selectedPages: retrieval ? expandPages(retrieval.selected) : [],
           evidencePages: question.evidencePages,
           answer: result.answer,
         })
+
+        // 端到端与阶段时延写入 metrics 让 aggregate 能产生均值；分位数由 withPercentiles
+        // 从 perSample.timing 单独计算，不能把 P50/P95 误当均值
+        metrics.queryRewriteLatencyMs = timing.queryRewriteLatencyMs
+        metrics.retrievalLatencyMs = timing.retrievalLatencyMs
+        metrics.answerGenerationLatencyMs = timing.answerGenerationLatencyMs
+        metrics.queryEndToEndLatencyMs = timing.queryEndToEndLatencyMs
       } catch (e) {
+        // 时延不变量破坏是评测口径漂移而非样本失败，向上抛出让整轮失效
+        if (e instanceof TimingInvariantViolation) throw e
         errors.push({ sampleId: question.id, stage: 'generate', message: errorMessage(e) })
       }
     }
   }
 
+  const finishedAt = new Date().toISOString()
+  const { hits: cacheHits, misses: cacheMisses } = client.stats()
+  const runWallClockMs = Math.max(0, now() - runStartedMs)
   const raw = aggregate(perSample)
   const counts = metricSampleCounts(perSample)
   for (const metric of ['evidenceRecall', 'evidenceHit', 'contextPrecision', 'mrr']) {
     if (counts[metric] !== undefined) raw[`${metric}SampleCount`] = counts[metric]
   }
-  // 重命名 0/1 指标的聚合结果为「率」，让报表列名自解释
-  const metrics = withLatencyStats(renameRates(raw), client.latencies())
+  // 重命名 0/1 指标的聚合结果为「率」，让报表列名自解释；
+  // withLatencyStats 追加既有 latencyP50/P95（与 llmNetworkLatency* 同值，deprecated 待移除）
+  const metrics = withPercentiles(
+    withLatencyStats(renameRates(raw), client.latencies()),
+    collectTimingValues(perSample, perPaper, client),
+  )
 
   return {
     task: 'qa',
@@ -238,7 +315,14 @@ export async function runQaTask(args: QaTaskArgs): Promise<BenchResult> {
     meta: {
       model,
       ...(args.judgeModel ? { judgeModel: args.judgeModel } : {}),
-      timestamp: new Date().toISOString(),
+      timestamp: finishedAt,
+      startedAt,
+      finishedAt,
+      runWallClockMs,
+      cacheHits,
+      cacheMisses,
+      // 无请求时为 0，不能 NaN
+      cacheHitRate: cacheHits + cacheMisses > 0 ? cacheHits / (cacheHits + cacheMisses) : 0,
       gitSha,
       completed: perSample.length,
       total,
@@ -255,8 +339,60 @@ export async function runQaTask(args: QaTaskArgs): Promise<BenchResult> {
     },
     metrics,
     perSample,
+    perPaper,
     errors,
   }
+}
+
+/**
+ * 时延不变量破坏（pipeline 缺失 timing，或四个字段非有限/为负）是评测口径漂移
+ * 而非样本失败，用专用异常向上抛出让整轮失效，避免把诊断性失败吞成 errors 数据点。
+ */
+class TimingInvariantViolation extends Error {
+  constructor() {
+    super('runRagPipeline 返回的 timing 缺失，或存在非有限/负值的字段')
+    this.name = 'TimingInvariantViolation'
+  }
+}
+
+/**
+ * 本篇论文在 limit 约束下实际将执行的问题数。索引失败分支与成功分支共用，
+ * 保证 perPaper.questionCount 与 errors 计数口径一致。
+ */
+function countExecutedQuestions(sample: EvalSample, limit: number | undefined, total: number): number {
+  const remaining = limit === undefined ? Infinity : Math.max(0, limit - total)
+  return Math.min(sample.questions.length, remaining)
+}
+
+/**
+ * 收集分位数聚合需要的时延样本：
+ * - perSample.timing 中的 retrieval / generation / end-to-end（失败样本不写 timing，自动缺席）
+ * - perPaper 成功索引的 indexBuildLatencyMs（失败只写 error，不产生时长）
+ * - client.latencies() 的网络 LLM 延迟
+ */
+function collectTimingValues(
+  perSample: PerSampleRecord[],
+  perPaper: PaperTimingRecord[],
+  client: LlmClient,
+): Record<string, number[]> {
+  const values: Record<string, number[]> = {
+    indexBuildLatency: [],
+    retrievalLatency: [],
+    answerGenerationLatency: [],
+    queryEndToEndLatency: [],
+    llmNetworkLatency: [],
+  }
+  for (const record of perPaper) {
+    if (record.indexBuildLatencyMs !== undefined) values.indexBuildLatency.push(record.indexBuildLatencyMs)
+  }
+  for (const record of perSample) {
+    if (!record.timing) continue
+    values.retrievalLatency.push(record.timing.retrievalLatencyMs)
+    values.answerGenerationLatency.push(record.timing.answerGenerationLatencyMs)
+    values.queryEndToEndLatency.push(record.timing.queryEndToEndLatencyMs)
+  }
+  values.llmNetworkLatency.push(...client.latencies())
+  return values
 }
 
 /** evidenceHit → evidenceHitRate 等；均值本身就是比率，只是改个名。 */

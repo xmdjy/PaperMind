@@ -15,11 +15,22 @@ export interface LlmClientOptions {
   fetchImpl?: typeof fetch
 }
 
+/** 一次 LLM 调用的观测记录：区分缓存命中与真实网络请求。 */
+export interface LlmRequestTiming {
+  cacheHit: boolean
+  /** 对 hit：缓存读取；对 miss：完整 HTTP 请求 */
+  elapsedMs: number
+  /** 仅 miss 存在：真实网络延迟（含服务端排队与生成） */
+  networkLatencyMs?: number
+}
+
 export interface LlmClient {
   complete: LLMFn
   chat: ChatLLMFn
   stats(): { hits: number; misses: number }
   latencies(): number[]
+  /** 请求级 telemetry，仅内存中供测试与未来诊断；结果 JSON 只写聚合计数与网络分位数 */
+  requestTimings(): LlmRequestTiming[]
 }
 
 /**
@@ -91,12 +102,14 @@ export function createLlmClient(opts: LlmClientOptions = {}): LlmClient {
   let hits = 0
   let misses = 0
   const latencyList: number[] = []
+  const requestTimingList: LlmRequestTiming[] = []
 
   if (useCache) mkdirSync(cacheDir, { recursive: true })
 
   async function chat(messages: ChatMessage[]): Promise<string> {
     const key = cacheKey(env.provider, env.baseUrl, env.model, messages)
     const cachePath = join(cacheDir, `${key}.json`)
+    const callStartedMs = Date.now()
 
     if (useCache) {
       // 缓存文件可能被中断的写入或外部改动损坏；读失败一律当 miss 处理，
@@ -106,6 +119,8 @@ export function createLlmClient(opts: LlmClientOptions = {}): LlmClient {
       const cached = readCache(cachePath)
       if (cached !== null) {
         hits++
+        // 命中只记缓存读取成本，不计入 latencies()（latency 语义为真实网络延迟）
+        requestTimingList.push({ cacheHit: true, elapsedMs: Date.now() - callStartedMs })
         return cached
       }
     }
@@ -113,7 +128,10 @@ export function createLlmClient(opts: LlmClientOptions = {}): LlmClient {
 
     const started = Date.now()
     const content = await request(messages)
-    latencyList.push(Date.now() - started)
+    const networkLatencyMs = Date.now() - started
+    latencyList.push(networkLatencyMs)
+    // 请求失败不追加成功 latency（misses 已增加），但 request 内抛错走不到这里
+    requestTimingList.push({ cacheHit: false, elapsedMs: Date.now() - callStartedMs, networkLatencyMs })
 
     // 只缓存成功响应；失败会在 request 内抛出，走不到这里。
     // 载荷与 cacheKey 同构（带上 provider / baseUrl），否则拿到一个缓存文件无法反查它属于哪个端点。
@@ -164,6 +182,7 @@ export function createLlmClient(opts: LlmClientOptions = {}): LlmClient {
     chat,
     stats: () => ({ hits, misses }),
     latencies: () => [...latencyList],
+    requestTimings: () => [...requestTimingList],
   }
 }
 
