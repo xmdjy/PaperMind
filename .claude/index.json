@@ -1,12 +1,13 @@
 {
-  "generated_at": "2026-06-07T21:33:55Z",
+  "generated_at": "2026-08-02T15:49:42Z",
   "project": "PaperMind",
   "root_claude_md": "CLAUDE.md",
   "scan_coverage": {
-    "estimated_total_source_files": 15,
-    "scanned": 15,
+    "estimated_total_source_files": 36,
+    "scanned": 36,
     "coverage_pct": 100,
-    "truncated": false
+    "truncated": false,
+    "notes": "36 = 可文档化源码文件（*.ts/*.vue/*.css/*.json/*.html/*.d.ts + 配置）。不含 node_modules、dist、dist-electron、release、二进制资源（assets/*.png、public/pdf.worker.min.mjs 生成物）。"
   },
   "modules": [
     {
@@ -18,7 +19,48 @@
       "interfaces": ["electron/ipc.ts", "electron/preload.ts"],
       "data_model": ["electron/db/schema.ts", "electron/db/index.ts"],
       "tests": null,
-      "gaps": ["no tests"]
+      "gaps": ["主进程无单测（Vitest 已排除 electron/**）", "highlights 表/通道已就绪但 UI 未落库"]
+    },
+    {
+      "name": "electron/db",
+      "path": "electron/db/",
+      "claude_md": "electron/db/CLAUDE.md",
+      "language": "TypeScript",
+      "entry": "electron/db/index.ts",
+      "interfaces": ["electron/db/index.ts"],
+      "data_model": ["electron/db/schema.ts"],
+      "tables": ["knowledge_bases", "papers", "conversations", "messages", "highlights", "settings", "paper_indexes"],
+      "tests": null,
+      "gaps": ["无 DB 层集成测试"]
+    },
+    {
+      "name": "src",
+      "path": "src/",
+      "claude_md": "src/CLAUDE.md",
+      "language": "Vue/TypeScript",
+      "entry": ["src/main.ts", "src/App.vue"],
+      "interfaces": ["src/types/db.d.ts", "src/types/markdown-it-texmath.d.ts", "src/shims-vue.d.ts"],
+      "styles": ["src/styles/global.css"],
+      "tests": [
+        "src/tests/setup.ts",
+        "src/tests/paper.store.test.ts",
+        "src/tests/chat.store.test.ts",
+        "src/tests/pageIndex.test.ts",
+        "src/tests/pdfUtils.test.ts",
+        "src/tests/abstractSummarizer.test.ts",
+        "src/tests/markdown.test.ts"
+      ],
+      "gaps": ["无组件渲染测试"]
+    },
+    {
+      "name": "router",
+      "path": "src/router/",
+      "claude_md": "src/router/CLAUDE.md",
+      "language": "TypeScript",
+      "entry": "src/router/index.ts",
+      "interfaces": ["src/router/index.ts"],
+      "tests": null,
+      "gaps": []
     },
     {
       "name": "stores",
@@ -28,8 +70,8 @@
       "entry": ["src/stores/paper.ts", "src/stores/chat.ts"],
       "interfaces": ["src/types/db.d.ts"],
       "data_model": ["src/stores/paper.ts", "src/stores/chat.ts"],
-      "tests": null,
-      "gaps": ["no tests"]
+      "tests": ["src/tests/paper.store.test.ts", "src/tests/chat.store.test.ts"],
+      "gaps": ["generateAbstract 多篇合并路径无专门用例"]
     },
     {
       "name": "views",
@@ -39,7 +81,7 @@
       "entry": ["src/views/LibraryView.vue", "src/views/ReaderView.vue", "src/views/ChatView.vue", "src/views/SettingsView.vue"],
       "interfaces": ["src/router/index.ts"],
       "tests": null,
-      "gaps": ["no tests"]
+      "gaps": ["无页面级渲染/交互测试", "导入进度状态机未覆盖"]
     },
     {
       "name": "components",
@@ -47,17 +89,40 @@
       "claude_md": "src/components/CLAUDE.md",
       "language": "Vue/TypeScript",
       "entry": ["src/components/PdfViewer.vue", "src/components/ChatPanel.vue", "src/components/ParamPanel.vue"],
-      "interfaces": ["src/utils/pdfUtils.ts"],
+      "interfaces": ["src/utils/pdfUtils.ts", "src/utils/markdown.ts"],
       "tests": null,
-      "gaps": ["no tests", "pdf worker uses CDN — needs local fallback for offline build"]
+      "gaps": ["PdfViewer 高亮/文本层无测试", "ChatPanel Markdown 渲染无组件测试", "PDF 高亮未接入 IPC 落库"]
+    },
+    {
+      "name": "utils",
+      "path": "src/utils/",
+      "claude_md": "src/utils/CLAUDE.md",
+      "language": "TypeScript",
+      "entry": ["src/utils/pdfUtils.ts", "src/utils/pageIndex.ts", "src/utils/markdown.ts", "src/utils/abstractSummarizer.ts"],
+      "interfaces": ["src/utils/pageIndex.ts", "src/utils/markdown.ts", "src/utils/abstractSummarizer.ts"],
+      "tests": ["src/tests/pdfUtils.test.ts", "src/tests/pageIndex.test.ts", "src/tests/markdown.test.ts", "src/tests/abstractSummarizer.test.ts"],
+      "gaps": ["parsePdfMeta 无 fixture 测试（需真实 PDF）", "callAbstractModel 网络错误分支未覆盖"]
     }
   ],
-  "ignored": ["node_modules/**", ".git/**", "dist/**", "dist-electron/**", "release/**"],
-  "gap_list": [
-    "No test framework configured — recommend adding Vitest for stores and utils",
-    "src/styles/global.css not read (CSS variables / theming)",
-    "src/App.vue not read (sidebar layout, store init calls)",
-    "vite.config.ts not read (electron plugin config, build targets)"
+  "ignored": [
+    "node_modules/**",
+    ".git/**",
+    "dist/**",
+    "dist-electron/**",
+    "release/**",
+    "assets/*.png (二进制)",
+    "public/pdf.worker.min.mjs (构建期从 pdfjs-dist 复制的生成物)"
   ],
-  "next_run_priority": ["src/App.vue", "src/styles/global.css", "vite.config.ts", "tsconfig.json"]
+  "gap_list": [
+    "Vue 组件无渲染测试：PdfViewer（高亮叠加层/文本层）、ChatPanel（Markdown/KaTeX 渲染）、SettingsView（profile CRUD）",
+    "parsePdfMeta 缺 fixture 测试（需真实 PDF 文件）",
+    "PDF 高亮为前端内存态，highlights 表/IPC 通道未接入落库",
+    "主进程与 electron/db 无集成测试",
+    "abstractSummarizer.callAbstractModel 的网络/错误分支未覆盖"
+  ],
+  "next_run_priority": [
+    "src/components/PdfViewer.vue (高亮持久化落地点)",
+    "electron/db/index.ts + highlightApi (接线 highlights)",
+    "src/utils/pdfUtils.ts (parsePdfMeta fixture)"
+  ]
 }

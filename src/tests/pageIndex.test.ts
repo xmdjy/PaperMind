@@ -1,5 +1,5 @@
 import { describe, it, expect, vi } from 'vitest'
-import { scoreAndSelect, buildPageIndex } from '../utils/pageIndex'
+import { scoreAndSelect, buildPageIndex, detectSectionBoundaries, reconstructTextLines, extractPages } from '../utils/pageIndex'
 import type { IndexNode } from '../utils/pageIndex'
 
 // pdfjs-dist 在 pageIndex.ts 顶层导入，测试中需要 mock
@@ -181,5 +181,87 @@ describe('buildPageIndex range coverage', () => {
     const allLeaves = tree.nodes.length > 0 ? tree.nodes : [tree]
     const coversPage0 = allLeaves.some(n => n.startPage === 0)
     expect(coversPage0).toBe(true)
+  })
+
+  it('splits a long semantic section to maxSectionPages and labels the parts', async () => {
+    const pages = ['1. Introduction', 'a', 'b', 'c', 'd', 'e', '2. Methods', 'f']
+    const tree = await buildPageIndex(pages, vi.fn().mockResolvedValue('{"title":"Section","summary":""}'), {
+      minSectionPages: 1,
+      maxSectionPages: 3,
+    })
+    expect(tree.nodes.map(node => [node.startPage, node.endPage])).toEqual([[0, 2], [3, 5], [6, 7]])
+    expect(tree.nodes[0].title).toContain('Part 1')
+    expect(tree.nodes[1].title).toContain('Part 2')
+  })
+
+  it('rejects an invalid maxSectionPages instead of producing fractional page ranges', async () => {
+    await expect(buildPageIndex(['a', 'b'], vi.fn(), { maxSectionPages: 1.5 })).rejects.toThrow(/maxSectionPages/)
+  })
+})
+
+describe('PDF line reconstruction and semantic sections', () => {
+  it('keeps visual lines when a title sits in the middle of a PDF page', () => {
+    const text = reconstructTextLines([
+      { str: 'body', transform: [1, 0, 0, 1, 20, 700] },
+      { str: 'text', transform: [1, 0, 0, 1, 55, 700], hasEOL: true },
+      { str: '2. Methods', transform: [1, 0, 0, 1, 120, 500], hasEOL: true },
+      { str: 'more body', transform: [1, 0, 0, 1, 20, 480] },
+    ])
+    expect(text).toBe('body text\n2. Methods\nmore body')
+    expect(detectSectionBoundaries([text, 'INTRODUCTION\ncontent', '第3节 实验设置\n正文'])).toEqual([0, 1, 2])
+  })
+
+  it('collapses adjacent repeated running headers to one section boundary', () => {
+    expect(detectSectionBoundaries([
+      '1 Introduction\nfirst page',
+      '1 Introduction\ncontinued text',
+      '2 Methods\nmethod text',
+      '2 Methods\ncontinued methods',
+    ])).toEqual([0, 2])
+  })
+
+  it('extractPages through buildPageIndex uses heading ranges instead of fixed chunks', async () => {
+    const pdf = {
+      numPages: 6,
+      getPage: vi.fn(async (page: number) => ({
+        getTextContent: async () => ({ items: [{ str: page === 2 ? '1. Introduction' : page === 5 ? '2. Methods' : `body ${page}`, transform: [1, 0, 0, 1, 30, 500], hasEOL: true }] }),
+      })),
+    }
+    const pdfjs = await import('pdfjs-dist/legacy/build/pdf.mjs') as any
+    pdfjs.getDocument.mockReturnValue({ promise: pdf })
+    const extracted = await extractPages(btoa('fixture'))
+    const tree = await buildPageIndex(extracted, vi.fn().mockResolvedValue('{"title":"S","summary":""}'), { minSectionPages: 1 })
+    expect(tree.nodes.map(node => [node.startPage, node.endPage])).toEqual([[0, 0], [1, 3], [4, 5]])
+  })
+})
+
+describe('score response validation', () => {
+  for (const raw of [
+    '[{"id":3,"score":1},{"id":1,"score":2},{"id":2,"score":3}]',
+    '[{"id":"0","score":1},{"id":1,"score":2},{"id":2,"score":3}]',
+    '[{"id":0,"score":1},{"id":1},{"id":2,"score":3}]',
+    '[{"id":0,"score":1},{"id":0,"score":2},{"id":2,"score":3}]',
+  ]) {
+    it(`degrades malformed score output: ${raw}`, async () => {
+      const result = await scoreAndSelect(makeRoot(), pages, 'q', vi.fn().mockResolvedValue(raw))
+      expect(result).toMatchObject({ degraded: true, degradedReason: 'invalid-score-schema' })
+      expect(result.selected.map(node => node.title)).toEqual(['Introduction'])
+    })
+  }
+
+  it('labels missing score coverage separately from malformed schema', async () => {
+    const result = await scoreAndSelect(makeRoot(), pages, 'q', vi.fn().mockResolvedValue('[]'))
+    expect(result).toMatchObject({ degraded: true, degradedReason: 'incomplete-score-coverage' })
+  })
+
+  it('retains a score request failure rather than mislabelling it as bad schema', async () => {
+    const result = await scoreAndSelect(makeRoot(), pages, 'q', vi.fn().mockRejectedValue(new Error('timeout')))
+    expect(result).toMatchObject({ degraded: true, degradedReason: 'score-request-failed' })
+  })
+
+  it('accepts fenced and prose-wrapped valid JSON', async () => {
+    const result = await scoreAndSelect(makeRoot(), pages, 'q', vi.fn().mockResolvedValue('Here:\n```JSON\n[{"id":1,"score":9},{"id":0,"score":1},{"id":2,"score":2}]\n```\nThanks'))
+    expect(result.degraded).toBe(false)
+    expect(result.selected.map(node => node.title)).toEqual(['Methods'])
   })
 })
