@@ -49,6 +49,55 @@ describe('resolveEnvConfig', () => {
   })
 })
 
+describe('generation-limit cache isolation', () => {
+  it('does not reuse a response cached under a different maxTokens limit', async () => {
+    const firstFetch = vi.fn().mockResolvedValue(okResponse('long'))
+    const secondFetch = vi.fn().mockResolvedValue(okResponse('short'))
+    const common = { provider: 'openai', model: 'm', apiKey: 'k', baseUrl: 'http://x/v1', cacheDir }
+    expect(await createLlmClient({ ...common, maxTokens: 100, fetchImpl: firstFetch as unknown as typeof fetch }).complete('q')).toBe('long')
+    expect(await createLlmClient({ ...common, maxTokens: 10, fetchImpl: secondFetch as unknown as typeof fetch }).complete('q')).toBe('short')
+    expect(secondFetch).toHaveBeenCalledOnce()
+  })
+})
+
+describe('request timeout', () => {
+  it('maps an AbortError caused by its timer to a diagnostic timeout', async () => {
+    const fetchImpl = vi.fn((_url: string, init?: RequestInit) => new Promise<Response>((_, reject) => init?.signal?.addEventListener('abort', () => reject(Object.assign(new Error('aborted'), { name: 'AbortError' })))))
+    const client = createLlmClient({ provider: 'openai', model: 'm', apiKey: 'k', baseUrl: 'http://x/v1', cacheDir, timeoutMs: 1, fetchImpl: fetchImpl as unknown as typeof fetch })
+    await expect(client.complete('q')).rejects.toThrow(/请求超时/)
+  })
+})
+
+describe('recoverable request retries', () => {
+  it('retries transient fetch failures before returning a successful answer', async () => {
+    const fetchImpl = vi.fn()
+      .mockRejectedValueOnce(new TypeError('fetch failed'))
+      .mockRejectedValueOnce(new Error('terminated'))
+      .mockResolvedValue(okResponse('recovered'))
+    const client = createLlmClient({ provider: 'openai', model: 'm', apiKey: 'k', baseUrl: 'http://x/v1', cacheDir, retryAttempts: 2, retryBaseDelayMs: 0, fetchImpl: fetchImpl as unknown as typeof fetch })
+    await expect(client.complete('q')).resolves.toBe('recovered')
+    expect(fetchImpl).toHaveBeenCalledTimes(3)
+  })
+
+  it('does not retry non-recoverable authorization failures', async () => {
+    const fetchImpl = vi.fn().mockResolvedValue({ ok: false, status: 401, text: async () => 'unauthorized' } as unknown as Response)
+    const client = createLlmClient({ provider: 'openai', model: 'm', apiKey: 'k', baseUrl: 'http://x/v1', cacheDir, retryAttempts: 3, retryBaseDelayMs: 0, fetchImpl: fetchImpl as unknown as typeof fetch })
+    await expect(client.complete('q')).rejects.toThrow(/401/)
+    expect(fetchImpl).toHaveBeenCalledOnce()
+  })
+
+  it('allows a benchmark to keep retrying recoverable failures until it gets an answer', async () => {
+    const fetchImpl = vi.fn()
+      .mockRejectedValueOnce(new TypeError('fetch failed'))
+      .mockRejectedValueOnce(new Error('terminated'))
+      .mockRejectedValueOnce(new TypeError('fetch failed'))
+      .mockResolvedValue(okResponse('eventually recovered'))
+    const client = createLlmClient({ provider: 'openai', model: 'm', apiKey: 'k', baseUrl: 'http://x/v1', cacheDir, retryAttempts: Number.POSITIVE_INFINITY, retryBaseDelayMs: 0, fetchImpl: fetchImpl as unknown as typeof fetch })
+    await expect(client.complete('q')).resolves.toBe('eventually recovered')
+    expect(fetchImpl).toHaveBeenCalledTimes(4)
+  })
+})
+
 describe('createLlmClient 缓存', () => {
   it('相同 prompt 第二次命中缓存，不再发请求', async () => {
     const fetchImpl = vi.fn().mockResolvedValue(okResponse('answer'))
@@ -112,6 +161,19 @@ describe('createLlmClient 缓存', () => {
 
     expect(await client.complete('hello')).toBe('ollama-answer')
     expect(fetchImpl.mock.calls[0][0]).toBe('http://localhost:11434/api/chat')
+  })
+
+  it('OpenAI 兼容地址未带 /v1 时补全版本路径，并透传生成上限', async () => {
+    const fetchImpl = vi.fn().mockResolvedValue(okResponse('answer'))
+    const client = createLlmClient({
+      provider: 'openai', model: 'deepseek-v4-flash', apiKey: 'k', baseUrl: 'https://api.deepseek.com',
+      maxTokens: 4096, cacheDir, fetchImpl: fetchImpl as unknown as typeof fetch,
+    })
+
+    await client.complete('hello')
+
+    expect(fetchImpl.mock.calls[0][0]).toBe('https://api.deepseek.com/v1/chat/completions')
+    expect(JSON.parse(fetchImpl.mock.calls[0][1].body)).toMatchObject({ max_tokens: 4096 })
   })
 
   it('记录每次真实请求的耗时', async () => {

@@ -20,6 +20,10 @@ describe('parseArgs', () => {
     expect(parseArgs(['--limit', '20']).limit).toBe(20)
   })
 
+  it('解析 --mode full-context', () => {
+    expect(parseArgs(['--mode', 'full-context']).mode).toBe('full-context')
+  })
+
   it('解析布尔 flag', () => {
     const a = parseArgs(['--judge', '--no-cache'])
     expect(a.judge).toBe(true)

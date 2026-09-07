@@ -24,8 +24,9 @@ export function fmtDuration(ms: number): string {
   if (!Number.isFinite(ms) || ms < 0) return '—'
   if (ms < 1000) return `${Math.round(ms)} ms`
   if (ms < 60_000) return `${(ms / 1000).toFixed(2)} s`
-  const minutes = Math.floor(ms / 60_000)
-  const seconds = Math.round((ms % 60_000) / 1000)
+  const roundedSeconds = Math.round(ms / 1000)
+  const minutes = Math.floor(roundedSeconds / 60)
+  const seconds = roundedSeconds % 60
   return `${minutes}m ${seconds}s`
 }
 
@@ -101,8 +102,8 @@ export function renderReport(
   const timingBlock = renderTimingSection(results)
   if (timingBlock.length > 0) lines.push(...timingBlock, '')
 
-  lines.push(`| 配置 | 完成 | ${metricNames.join(' | ')} |`)
-  lines.push(`| --- | --- | ${metricNames.map(() => '---').join(' | ')} |`)
+  lines.push(`| 配置 | 检索算法 | 完成 | ${metricNames.join(' | ')} |`)
+  lines.push(`| --- | --- | --- | ${metricNames.map(() => '---').join(' | ')} |`)
   results.forEach((r, i) => {
     const cells = metricNames.map(n => {
       const v = r.metrics[n]
@@ -110,7 +111,7 @@ export function renderReport(
       return i === bestIndex && n === primary ? `**${fmt(v)}**` : fmt(v)
     })
     const label = i === bestIndex ? `**${r.config.name}**` : r.config.name
-    lines.push(`| ${label} | ${r.meta.completed}/${r.meta.total} | ${cells.join(' | ')} |`)
+    lines.push(`| ${label} | ${r.meta.retrievalAlgorithm ?? '—'} | ${r.meta.completed}/${r.meta.total} | ${cells.join(' | ')} |`)
   })
   lines.push('')
 
@@ -195,7 +196,9 @@ export function renderComparison(a: BenchResult, b: BenchResult): string {
   lines.push(`## 结果对比：${a.config.name} → ${b.config.name}`)
   lines.push('')
   lines.push(`- A：\`${a.meta.gitSha}\` @ ${a.meta.timestamp}（完成 ${a.meta.completed}/${a.meta.total}）`)
+  lines.push(`  - mode：\`${a.meta.mode ?? 'rag'}\`；检索：\`${a.meta.retrievalAlgorithm ?? '—'}\``)
   lines.push(`- B：\`${b.meta.gitSha}\` @ ${b.meta.timestamp}（完成 ${b.meta.completed}/${b.meta.total}）`)
+  lines.push(`  - mode：\`${b.meta.mode ?? 'rag'}\`；检索：\`${b.meta.retrievalAlgorithm ?? '—'}\``)
   lines.push('')
   lines.push('| 指标 | A | B | 差值 |')
   lines.push('| --- | --- | --- | --- |')

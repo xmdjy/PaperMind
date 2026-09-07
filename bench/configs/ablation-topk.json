@@ -1,5 +1,6 @@
 {
   "name": "ablation-topk",
+  "kind": "papermind",
   "matrix": {
     "topK": [1, 2, 3],
     "minScore": [4],

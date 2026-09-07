@@ -1,5 +1,6 @@
 {
   "name": "default",
+  "kind": "papermind",
   "matrix": {
     "topK": [2],
     "minScore": [4],

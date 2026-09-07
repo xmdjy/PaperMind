@@ -37,15 +37,37 @@ export interface EvalSample {
  * 刻意 Omit externalContext：它会让 runRagPipeline 跳过改写与检索，
  * 一个语法合法的配置就能静默关掉正在被评测的整条链路，而指标照常输出数字。
  */
-export interface BenchConfig extends IndexOptions, Omit<RagOptions, 'externalContext'> {
+export interface PaperMindConfig extends IndexOptions, Omit<RagOptions, 'externalContext'> {
   name: string
+  kind?: 'papermind'
 }
+
+export interface TraditionalEmbeddingConfig {
+  model: string
+  revision: string
+  queryPrefix: string
+  normalize: true
+  maxLength: number
+}
+
+export interface TraditionalRagConfig {
+  name: string
+  kind: 'traditional-rag'
+  chunking: { tokenizer: 'bge-m3'; chunkSize: number; overlap: number }
+  retrieval: { algorithm: 'cosine'; topK: number; embedding: TraditionalEmbeddingConfig }
+    | { algorithm: 'bm25'; topK: number; k1: number; b: number }
+    | { algorithm: 'jaccard'; topK: number }
+  generationContext: { topK: number; maxTokens: number }
+}
+
+export type BenchConfig = PaperMindConfig | TraditionalRagConfig
 
 /** 配置文件形态：matrix 各字段取值数组，展开为笛卡尔积。 */
 export interface ConfigFile {
   name: string
+  kind?: 'papermind'
   /** 键收敛到 BenchConfig 的可调字段，防止拼错的键静默失效 */
-  matrix: Partial<Record<Exclude<keyof BenchConfig, 'name'>, Array<number | boolean>>>
+  matrix: Partial<Record<Exclude<keyof PaperMindConfig, 'name' | 'kind'>, Array<number | boolean>>>
 }
 
 export interface SampleError {
@@ -114,6 +136,14 @@ export interface BenchResult {
     cacheMisses?: number
     /** 无请求时为 0，不能 NaN */
     cacheHitRate?: number
+    /** rag 为生产 RAG；full-context 为整篇论文直投 LLM 的无检索基线。 */
+    mode?: 'rag' | 'full-context'
+    /** 请求上限是实验口径的一部分，尤其影响 full-context 与 judge。 */
+    requestTimeoutMs?: number
+    generationMaxTokens?: number
+    refusalPatternVersion?: string
+    rubricVersion?: string
+    retrievalAlgorithm?: 'papermind-llm' | 'cosine' | 'bm25' | 'jaccard' | 'none'
     /** unanswerableAccuracy 的判定口径，避免两种口径的数字被混着对比 */
     unanswerableMethod?: 'pattern' | 'judge'
     /** 缓存模式：normal 读写缓存；bypass（--no-cache）只跳过读，不覆写已有缓存文件 */

@@ -41,6 +41,8 @@ npm run bench -- --task summary --dataset smoke  --config default
 npm run bench -- --task qa --config ablation-topk         # 跑 topK 消融矩阵
 npm run bench -- --task qa --dataset smoke --limit 5      # 快速迭代
 npm run bench -- --task qa --judge                        # 加 LLM-as-judge
+npm run bench -- --task qa --mode full-context             # 无检索全文直投基线
+npm run bench -- --task qa --config rag-bm25               # 传统 BM25 基线
 npm run bench -- --compare results/a.json results/b.json  # 对比两次结果
 ```
 
@@ -81,7 +83,7 @@ npm run bench -- --compare results/a.json results/b.json  # 对比两次结果
 
 ## 缓存
 
-LLM 响应按 `sha256(provider + baseUrl + model + messages)` 缓存到 `bench/cache/`（字段以 `\0` 分隔）。key 含 provider 与 baseUrl——同名模型（如 llama3）在不同端点是不同的被测对象，跨端点 / 跨模型天然隔离。这让配置矩阵可行：不同 `topK` 共享同一份索引构建结果，只有评分调用需要重发。失败请求也计入 misses，故 `hits/(hits+misses)` 在有错误时会偏低；runner 为纯串行，无并发去重需求——若未来并行跑样本需加 in-flight 去重，否则命中率会塌。
+LLM 响应按 `sha256(provider + baseUrl + model + messages + maxTokens)` 缓存到 `bench/cache/`（字段以 `\0` 分隔）。key 含 provider、baseUrl 与生成上限——同名模型在不同端点或不同截断口径下不会串用缓存。这让配置矩阵可行：不同 `topK` 共享同一份索引构建结果，只有评分调用需要重发。失败请求也计入 misses，故 `hits/(hits+misses)` 在有错误时会偏低；runner 为纯串行，无并发去重需求——若未来并行跑样本需加 in-flight 去重，否则命中率会塌。
 
 `--no-cache` 当前只跳过**读**缓存、不覆写已有缓存文件（与 spec §8 的「强制重跑并覆写」有差距），`meta.cacheMode` 如实记录实际口径（`normal` / `bypass`）。summary 任务走 HuggingFace 摘要模型、不经过 LLM 缓存，`cacheMode` 仅做口径统一，`--no-cache` 对它无实际作用。
 

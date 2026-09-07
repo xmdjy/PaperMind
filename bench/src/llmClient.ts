@@ -11,6 +11,14 @@ export interface LlmClientOptions {
   baseUrl?: string
   cacheDir?: string
   useCache?: boolean
+  /** 单次 HTTP 请求超时；仅用于需要避免长上下文卡死的 benchmark 模式。 */
+  timeoutMs?: number
+  /** OpenAI 兼容接口的生成 token 上限；未设时沿用服务端默认。 */
+  maxTokens?: number
+  /** 可恢复的网络/限流/服务端错误额外重试次数；默认 0，由 benchmark CLI 显式配置。 */
+  retryAttempts?: number
+  /** 第一次重试的退避毫秒数；后续指数增长并加抖动。 */
+  retryBaseDelayMs?: number
   /** 注入 fetch，测试用 */
   fetchImpl?: typeof fetch
 }
@@ -50,6 +58,20 @@ function defaultBaseUrl(provider: string): string {
   return provider === 'ollama' ? 'http://localhost:11434' : 'https://api.openai.com/v1'
 }
 
+/** DeepSeek 仅官方根地址需 /v1；带 /beta 等路径的用户地址原样保留。 */
+function chatCompletionsBaseUrl(baseUrl: string): string {
+  const normalized = baseUrl.replace(/\/+$/, '')
+  try {
+    const url = new URL(normalized)
+    return url.hostname === 'api.deepseek.com' && (url.pathname === '' || url.pathname === '/')
+      ? `${normalized}/v1`
+      : normalized
+  } catch {
+    return normalized
+  }
+}
+
+
 /**
  * 纯环境变量配置（不掺入显式 opts），供外部脚本预检配置用。
  * 对外签名与「缺 model 抛错」的行为是稳定契约，改动需同步现有用例。
@@ -60,8 +82,8 @@ export function resolveEnvConfig(env: Record<string, string | undefined>) {
 
 // key 必须包含 provider 与 baseUrl：同名模型（如 llama3）在不同端点上是不同的被测对象，
 // 否则配置矩阵对比会因跨端点命中缓存而得到错误结论。分隔符用 \0，避免字段内容拼接歧义。
-function cacheKey(provider: string, baseUrl: string, model: string, messages: ChatMessage[]): string {
-  const raw = [provider, baseUrl, model, JSON.stringify(messages)].join('\0')
+function cacheKey(provider: string, baseUrl: string, model: string, messages: ChatMessage[], generation: { maxTokens?: number }): string {
+  const raw = [provider, baseUrl, model, JSON.stringify(messages), JSON.stringify(generation)].join('\0')
   return createHash('sha256').update(raw).digest('hex')
 }
 
@@ -107,7 +129,7 @@ export function createLlmClient(opts: LlmClientOptions = {}): LlmClient {
   if (useCache) mkdirSync(cacheDir, { recursive: true })
 
   async function chat(messages: ChatMessage[]): Promise<string> {
-    const key = cacheKey(env.provider, env.baseUrl, env.model, messages)
+    const key = cacheKey(env.provider, env.baseUrl, env.model, messages, { maxTokens: opts.maxTokens })
     const cachePath = join(cacheDir, `${key}.json`)
     const callStartedMs = Date.now()
 
@@ -148,11 +170,43 @@ export function createLlmClient(opts: LlmClientOptions = {}): LlmClient {
   }
 
   async function request(messages: ChatMessage[]): Promise<string> {
+    const retries = opts.retryAttempts ?? 0
+    const baseDelay = opts.retryBaseDelayMs ?? 1_000
+    let lastError: unknown
+    for (let attempt = 0; attempt <= retries; attempt++) {
+      try {
+        return await requestOnce(messages)
+      } catch (error) {
+        lastError = error
+        if (attempt === retries || !isRetryable(error)) throw error
+        // capped exponential backoff + deterministic bounded jitter prevents reconnect storms.
+        const delay = Math.min(30_000, baseDelay * 2 ** attempt) + Math.floor(Math.random() * Math.max(1, baseDelay))
+        await sleep(delay)
+      }
+    }
+    throw lastError
+  }
+
+  async function requestOnce(messages: ChatMessage[]): Promise<string> {
+    const controller = opts.timeoutMs === undefined ? undefined : new AbortController()
+    const timeout = controller === undefined ? undefined : setTimeout(() => controller.abort(), opts.timeoutMs)
+    try {
+      return await requestWithSignal(messages, controller?.signal)
+    } catch (error) {
+      if (controller?.signal.aborted && (error as { name?: unknown })?.name === 'AbortError') throw new Error(`LLM 请求超时（${opts.timeoutMs}ms）`)
+      throw error
+    } finally {
+      if (timeout !== undefined) clearTimeout(timeout)
+    }
+  }
+
+  async function requestWithSignal(messages: ChatMessage[], signal?: AbortSignal): Promise<string> {
     if (env.provider === 'ollama') {
       const res = await doFetch(`${env.baseUrl}/api/chat`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ model: env.model, messages, stream: false }),
+        body: JSON.stringify({ model: env.model, messages, stream: false, ...(opts.maxTokens === undefined ? {} : { options: { num_predict: opts.maxTokens } }) }),
+        signal,
       })
       if (!res.ok) throw new Error(`LLM 请求失败 ${res.status}: ${await readErrorBody(res)}`)
       const data = await res.json()
@@ -167,10 +221,16 @@ export function createLlmClient(opts: LlmClientOptions = {}): LlmClient {
       headers['Authorization'] = `Bearer ${env.apiKey}`
     }
 
-    const res = await doFetch(`${env.baseUrl}/chat/completions`, {
+    const res = await doFetch(`${chatCompletionsBaseUrl(env.baseUrl)}/chat/completions`, {
       method: 'POST',
       headers,
-      body: JSON.stringify({ model: env.model, messages, temperature: 0 }),
+      body: JSON.stringify({
+        model: env.model,
+        messages,
+        temperature: 0,
+        ...(opts.maxTokens === undefined ? {} : { max_tokens: opts.maxTokens }),
+      }),
+      signal,
     })
     if (!res.ok) throw new Error(`LLM 请求失败 ${res.status}: ${await readErrorBody(res)}`)
     const data = await res.json()
@@ -184,6 +244,17 @@ export function createLlmClient(opts: LlmClientOptions = {}): LlmClient {
     latencies: () => [...latencyList],
     requestTimings: () => [...requestTimingList],
   }
+}
+
+function isRetryable(error: unknown): boolean {
+  const message = error instanceof Error ? error.message : String(error)
+  if (/^(fetch failed|terminated|LLM 请求超时)/i.test(message)) return true
+  const status = /^LLM 请求失败 (\d{3})/.exec(message)?.[1]
+  return status === '408' || status === '409' || status === '429' || (status !== undefined && Number(status) >= 500)
+}
+
+function sleep(ms: number): Promise<void> {
+  return new Promise(resolve => setTimeout(resolve, ms))
 }
 
 /** 读缓存；文件损坏或结构不符（如 content 为 null）时返回 null，由调用方当 miss 处理。 */
