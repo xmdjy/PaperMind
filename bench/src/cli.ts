@@ -13,10 +13,13 @@ import { createLlmClient, resolveEnvConfig } from './llmClient'
 import { loadQasperDataset } from './datasets/qasper'
 import { loadSmokeDataset } from './datasets/smoke'
 import { runQaTask, DEFAULT_SYSTEM_PROMPT } from './runner/qa'
+import { runFullContextQaTask } from './runner/fullContextQa'
+import { runTraditionalRagQaTask } from './runner/traditionalRagQa'
 import { runSummaryTask } from './runner/summary'
 import { renderReport, renderComparison } from './report'
 import { benchPath } from './paths'
 import type { BenchResult, EvalSample, SampleSource } from './types'
+import type { PaperMindConfig } from './types'
 
 // 必须用 benchPath（fileURLToPath），不能用 new URL(...).pathname——
 // 后者保留百分号转义，路径含空格/中文时得到字面量 %20 目录，写文件静默失败
@@ -24,6 +27,11 @@ const RESULTS_DIR = () => benchPath(import.meta.url, '../results/')
 
 /** QASPER 参考答案是英文而生产 prompt 是中文，不强制英文作答则 answerF1 恒≈0（Task 10 裁定 3） */
 const QASPER_LANGUAGE_INSTRUCTION = '请依据参考内容，用论文原文语言（英文）作答。'
+const FULL_CONTEXT_LIMITS = { timeoutMs: 120_000, maxTokens: 4096 } as const
+const QA_REQUEST_TIMEOUT_MS = 120_000
+// QA 正式跑批不能因短暂网络/服务端故障丢失题目。不可恢复的配置或鉴权错误仍会立即抛出；
+// 可恢复错误则持续重试，直到该请求取得答案，保证结果不会带有幸存者偏差。
+const QA_RETRY_ATTEMPTS = Number.POSITIVE_INFINITY
 
 function gitSha(): string {
   try {
@@ -90,6 +98,13 @@ const judgeModel = process.env.BENCH_JUDGE_MODEL
 
 const sha = gitSha()
 const configs = await loadConfigs(args.config)
+// 不支持的组合必须在加载数据、发任何 LLM 请求或写结果前失败。
+if ((args.task === 'summary' || args.task === 'all') && configs.some(config => config.kind === 'traditional-rag')) {
+  throw new Error('传统 RAG 不支持 summary task')
+}
+if (args.mode === 'full-context' && configs.some(config => config.kind === 'traditional-rag')) {
+  throw new Error('--mode full-context 不接受 traditional-rag 配置；请使用 PaperMind 配置名')
+}
 const samples = await loadDatasets(args.dataset)
 mkdirSync(RESULTS_DIR(), { recursive: true })
 
@@ -138,14 +153,22 @@ for (const config of configs) {
     // 时无法一次传入，故按 source 分组各跑一次、结果分别落盘（文件名带 source 后缀）
     for (const [source, group] of groupBySource(samples)) {
       const env = resolveEnvConfig(process.env)
-      const client = createLlmClient({ ...env, useCache: args.useCache })
+      // 全文直投模式不截断论文；为避免上游长上下文请求永久卡死，单题请求 120 秒后中止并由 runner 记为失败后继续。
+      // 生成最多 4,096 tokens，防止推理模型在极简单的 QA 上无限延长隐藏推理；此限制不影响输入论文全文。
+      const client = createLlmClient({
+        ...env,
+        useCache: args.useCache,
+        timeoutMs: args.mode === 'full-context' ? FULL_CONTEXT_LIMITS.timeoutMs : QA_REQUEST_TIMEOUT_MS,
+        retryAttempts: QA_RETRY_ATTEMPTS,
+        ...(args.mode === 'full-context' ? { maxTokens: FULL_CONTEXT_LIMITS.maxTokens } : {}),
+      })
       // judge 只换模型，凭据与端点沿用主配置；缓存与主 client 共目录但 key 含模型名，互不污染
       const judgeClient = args.judge
-        ? createLlmClient({ ...env, model: judgeModel!, useCache: args.useCache })
+        ? createLlmClient({ ...env, model: judgeModel!, useCache: args.useCache, timeoutMs: args.mode === 'full-context' ? FULL_CONTEXT_LIMITS.timeoutMs : QA_REQUEST_TIMEOUT_MS, retryAttempts: QA_RETRY_ATTEMPTS, ...(args.mode === 'full-context' ? { maxTokens: FULL_CONTEXT_LIMITS.maxTokens } : {}) })
         : undefined
 
       process.stdout.write(`\n[QA] ${config.name}（${source}，${group.length} 篇）...\n`)
-      const result = await runQaTask({
+      const taskArgs = {
         samples: group,
         config,
         client,
@@ -156,9 +179,19 @@ for (const config of configs) {
         model: env.model,
         judgeClient,
         judgeModel: args.judge ? judgeModel : undefined,
-      })
+      }
+      const result = args.mode === 'full-context'
+        ? await runFullContextQaTask({ ...taskArgs, config })
+        : config.kind === 'traditional-rag'
+          ? await runTraditionalRagQaTask({ ...taskArgs, config })
+          : await runQaTask({ ...taskArgs, config })
       // --no-cache 当前只跳过读缓存，不覆写已有缓存文件（llmClient 待后续优化），如实记录口径
       result.meta.cacheMode = args.useCache ? 'normal' : 'bypass'
+      result.meta.mode = args.mode
+      if (args.mode === 'full-context') {
+        result.meta.requestTimeoutMs = FULL_CONTEXT_LIMITS.timeoutMs
+        result.meta.generationMaxTokens = FULL_CONTEXT_LIMITS.maxTokens
+      }
       // 缓存计数来自主 RAG client（meta.cacheHits/cacheMisses 在 runQaTask 内统计），
       // 不含 judgeClient——启用 --judge 时明确标注，避免被误读为整轮全部 LLM 流量
       if (args.judge) result.meta.cacheScope = 'rag'
@@ -174,10 +207,12 @@ for (const config of configs) {
   }
 
   if (args.task === 'summary' || args.task === 'all') {
+    // 已在循环前拒绝 traditional-rag；此处收窄仅供 TypeScript 表达该不变量。
+    const paperConfig = config as PaperMindConfig
     process.stdout.write(`\n[摘要] ${config.name}...\n`)
     const result = await runSummaryTask({
       samples,
-      config,
+      config: paperConfig,
       hfToken: process.env.HF_TOKEN ?? '',
       limit: args.limit,
       gitSha: sha,

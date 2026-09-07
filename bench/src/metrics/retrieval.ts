@@ -1,4 +1,5 @@
-import type { IndexNode, NodeScore } from '../../../src/utils/pageIndex'
+export interface PageSpan { startPage: number; endPage: number }
+export interface ScoredPageSpan { id: number; score: number }
 
 /** 估算 token 数：英文约 4 字符/token，够用作成本代理指标。 */
 const CHARS_PER_TOKEN = 4
@@ -8,7 +9,7 @@ export function estimateTokens(text: string): number {
 }
 
 /** 把节点的页码区间展开为去重升序页号数组（0-based）。 */
-export function expandPages(nodes: IndexNode[]): number[] {
+export function expandPages(nodes: PageSpan[]): number[] {
   const set = new Set<number>()
   for (const n of nodes) {
     for (let p = n.startPage; p <= n.endPage; p++) set.add(p)
@@ -18,11 +19,11 @@ export function expandPages(nodes: IndexNode[]): number[] {
 
 export interface RetrievalMetricArgs {
   /** scoreAndSelect 选中的节点 */
-  selected: IndexNode[]
+  selected: PageSpan[]
   /** 全部叶节点，用于把 scores 的 id 映射回页码区间 */
-  leaves: IndexNode[]
+  leaves: PageSpan[]
   /** LLM 原始打分；降级时为空 */
-  scores: NodeScore[]
+  scores: ScoredPageSpan[]
   /** 标注的 evidence 页号（0-based） */
   evidencePages: number[]
   /** 合并后的上下文文本，用于估算 token */
@@ -67,13 +68,13 @@ export function computeRetrievalMetrics(args: RetrievalMetricArgs): RetrievalMet
  * 调用方仅在有效 evidence 和评分时调用本函数。
  */
 function computeMrr(
-  leaves: IndexNode[],
-  scores: NodeScore[],
+  leaves: PageSpan[],
+  scores: ScoredPageSpan[],
   evidenceSet: Set<number>,
 ): number {
   if (scores.length === 0 || evidenceSet.size === 0) return 0
 
-  const ranked = [...scores].sort((a, b) => b.score - a.score)
+  const ranked = [...scores].sort((a, b) => b.score - a.score || a.id - b.id)
   for (let rank = 0; rank < ranked.length; rank++) {
     const leaf = leaves[ranked[rank].id]
     if (!leaf) continue

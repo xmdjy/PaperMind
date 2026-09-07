@@ -7,6 +7,7 @@ export interface BenchArgs {
   useCache: boolean
   out?: string
   compare?: [string, string]
+  mode: 'rag' | 'full-context'
 }
 
 const TASKS = ['qa', 'summary', 'all'] as const
@@ -34,6 +35,7 @@ export function parseArgs(argv: string[]): BenchArgs {
     config: 'default',
     judge: false,
     useCache: true,
+    mode: 'rag',
   }
 
   for (let i = 0; i < argv.length; i++) {
@@ -83,6 +85,12 @@ export function parseArgs(argv: string[]): BenchArgs {
       case '--no-cache':
         args.useCache = false
         break
+      case '--mode': {
+        const v = argv[++i]
+        if (v !== 'rag' && v !== 'full-context') throw new Error('--mode 取值非法：rag / full-context')
+        args.mode = v
+        break
+      }
       case '--compare': {
         const a = argv[++i]
         const b = argv[++i]
