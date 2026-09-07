@@ -2,22 +2,22 @@
   <div class="pdf-viewer" ref="containerRef">
     <div class="pdf-toolbar">
       <div class="tb-group">
-        <el-button size="small" text @click="prevPage" :disabled="currentPage <= 1">
+        <el-button size="small" text @click="prevPage" :disabled="currentPage <= 1" aria-label="上一页" title="上一页">
           <el-icon><ArrowUp /></el-icon>
         </el-button>
-        <span class="page-indicator">{{ currentPage }} / {{ totalPages }}</span>
-        <el-button size="small" text @click="nextPage" :disabled="currentPage >= totalPages">
+        <span class="page-indicator"><span class="page-current">{{ currentPage }}</span><span class="page-total"> / {{ totalPages }} 页</span></span>
+        <el-button size="small" text @click="nextPage" :disabled="currentPage >= totalPages" aria-label="下一页" title="下一页">
           <el-icon><ArrowDown /></el-icon>
         </el-button>
       </div>
       <div class="tb-group">
-        <el-button size="small" text @click="zoomOut"><el-icon><ZoomOut /></el-icon></el-button>
-        <span class="zoom-indicator">{{ Math.round(scale * 100) }}%</span>
-        <el-button size="small" text @click="zoomIn"><el-icon><ZoomIn /></el-icon></el-button>
+        <el-button size="small" text @click="zoomOut" :disabled="scale <= 0.1" aria-label="缩小论文" title="缩小"><el-icon><ZoomOut /></el-icon></el-button>
+        <button type="button" class="zoom-indicator fit-button" @click="fitToWidth" aria-label="适合宽度" title="点击适合宽度">{{ Math.round(scale * 100) }}%</button>
+        <el-button size="small" text @click="zoomIn" aria-label="放大论文" title="放大"><el-icon><ZoomIn /></el-icon></el-button>
       </div>
     </div>
 
-    <div class="pdf-scroll" ref="scrollRef">
+    <div class="pdf-scroll" ref="scrollRef" tabindex="0" aria-label="可滚动的 PDF 原文">
       <div class="pdf-pages" ref="pagesRef" />
     </div>
 
@@ -50,7 +50,8 @@ const scrollRef = ref<HTMLElement>()
 const pagesRef = ref<HTMLElement>()
 const currentPage = ref(1)
 const totalPages = ref(0)
-const scale = ref(1.3)
+const scale = ref(1)
+let fitOnNextRender = true
 const selectedText = ref('')
 
 let pdfDoc: any = null
@@ -155,6 +156,13 @@ async function renderPdf() {
   pagesRef.value.innerHTML = ''
   pdfDoc = await pdfjsLib.getDocument({ url: props.src }).promise
   totalPages.value = pdfDoc.numPages
+  if (fitOnNextRender && scrollRef.value?.clientWidth) {
+    const firstPage = await pdfDoc.getPage(1)
+    const pageWidth = firstPage.getViewport({ scale: 1 }).width
+    const availableWidth = Math.max(scrollRef.value.clientWidth - 48, 160)
+    scale.value = Math.min(availableWidth / pageWidth, 2)
+    fitOnNextRender = false
+  }
 
   for (let n = 1; n <= pdfDoc.numPages; n++) {
     await renderPage(n)
@@ -229,8 +237,18 @@ function scrollToPage(num: number) {
 
 function prevPage() { if (currentPage.value > 1) scrollToPage(--currentPage.value) }
 function nextPage() { if (currentPage.value < totalPages.value) scrollToPage(++currentPage.value) }
+function fitToWidth() {
+  fitOnNextRender = true
+  renderPdf()
+}
+
 function zoomIn() { scale.value = Math.min(scale.value + 0.2, 3); renderPdf() }
-function zoomOut() { scale.value = Math.max(scale.value - 0.2, 0.5); renderPdf() }
+function zoomOut() {
+  const nextScale = Math.max(scale.value - 0.2, 0.1)
+  if (nextScale >= scale.value) return
+  scale.value = nextScale
+  renderPdf()
+}
 
 function onMouseUp() {
   const sel = window.getSelection()
@@ -332,14 +350,15 @@ defineExpose({ scrollToPage })
 </script>
 
 <style scoped>
-.pdf-viewer { display: flex; flex-direction: column; height: 100%; position: relative; background: #1a1a22; }
+.pdf-viewer { display: flex; flex-direction: column; height: 100%; position: relative; background: var(--bg-reader); }
 
 .pdf-toolbar {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding: 8px 16px;
-  background: color-mix(in srgb, var(--bg-surface) 94%, transparent);
+  padding: 10px 18px;
+  min-height: 51px;
+  background: var(--bg-base);
   border-bottom: 1px solid var(--border);
   flex-shrink: 0;
 }
@@ -354,19 +373,26 @@ defineExpose({ scrollToPage })
 
 .pdf-scroll {
   flex: 1;
-  overflow-y: auto;
-  padding: 20px;
+  min-height: 0;
+  overflow: auto;
+  padding: 24px;
   display: flex;
   flex-direction: column;
-  align-items: center;
+  align-items: stretch;
   gap: 16px;
 }
+
+.pdf-pages { display: flex; flex-direction: column; align-items: center; gap: 22px; width: max-content; min-width: 100%; margin: 0 auto; }
+.page-current { color: var(--text-primary); }
+.page-total { color: var(--text-muted); }
+.fit-button { padding: 5px; background: transparent; border: 1px solid transparent; border-radius: 4px; cursor: pointer; }
+.fit-button:hover { background: var(--bg-hover); border-color: var(--border); }
 
 :deep(.pdf-page) {
   position: relative;
   background: white;
-  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.45);
-  border-radius: 3px;
+  box-shadow: 0 2px 8px rgb(53 45 38 / 12%), 0 0 0 1px rgb(53 45 38 / 6%);
+  border-radius: 1px;
 }
 :deep(.pdf-page canvas) { display: block; }
 :deep(.text-layer) {
@@ -383,12 +409,12 @@ defineExpose({ scrollToPage })
   cursor: text;
   transform-origin: 0 0;
 }
-:deep(.text-layer ::selection) { background: rgba(61, 184, 160, 0.4); }
+:deep(.text-layer ::selection) { background: rgba(155, 121, 68, 0.28); }
 :deep(.pdf-highlight-overlay) {
   position: absolute;
   z-index: 1;
   pointer-events: none;
-  background: rgba(255, 216, 74, 0.46);
+  background: rgba(230, 193, 104, 0.38);
   border-radius: 1px;
   mix-blend-mode: multiply;
 }
@@ -419,4 +445,8 @@ defineExpose({ scrollToPage })
   transition: background 0.15s var(--ease-out), color 0.15s var(--ease-out);
 }
 .popup-btn:hover { background: var(--accent-dim); color: var(--accent); }
+@media (max-width: 520px) {
+  .pdf-toolbar { padding-left: 12px; padding-right: 12px; }
+  .pdf-scroll { padding: 18px 24px; }
+}
 </style>

@@ -1,94 +1,76 @@
 <template>
-  <div class="chat-view">
-    <!-- Left: Paper list -->
-    <div class="chat-left">
-      <div class="left-header">
-        <el-select v-model="activeKbId" size="small" style="width:100%">
-          <el-option v-for="kb in paperStore.knowledgeBases" :key="kb.id" :label="kb.name" :value="kb.id" />
-        </el-select>
-      </div>
-      <div class="left-subheader">
-        <span>选择论文作为上下文</span>
-        <span class="selected-count">{{ selectedPaperIds.length }} 已选</span>
-      </div>
-      <el-scrollbar class="paper-list">
-        <div
-          v-for="p in kbPapers" :key="p.id"
-          class="paper-list-item" :class="{ selected: selectedPaperIds.includes(p.id) }"
-          @click="toggleSelect(p.id)"
-        >
-          <el-checkbox :model-value="selectedPaperIds.includes(p.id)" @click.stop="toggleSelect(p.id)" />
-          <div class="pli-info">
-            <span class="pli-title">{{ p.title || p.fileName }}</span>
-            <span class="pli-meta">{{ p.authors?.[0] || '未知' }} · {{ p.year || '—' }}</span>
-          </div>
-          <div class="pli-index" @click.stop>
-            <el-tooltip v-if="chatStore.indexedPapers.has(p.id)" content="已建立索引" placement="right">
-              <el-icon class="index-done"><CircleCheck /></el-icon>
-            </el-tooltip>
-            <el-icon v-else-if="chatStore.indexingPapers.has(p.id)" class="index-loading is-loading"><Loading /></el-icon>
-            <el-tooltip v-else content="建立 PageIndex 索引以启用智能检索" placement="right">
-              <el-button size="small" text @click="doIndex(p.id)"><el-icon><Download /></el-icon></el-button>
-            </el-tooltip>
-          </div>
-        </div>
-        <el-empty v-if="kbPapers.length === 0" description="该知识库暂无论文" :image-size="60" />
-      </el-scrollbar>
-
-      <div class="left-footer">
-        <div class="conv-list-label">历史对话</div>
-        <el-scrollbar max-height="200px">
-          <div
-            v-for="c in allConversations" :key="c.id"
-            class="conv-item" :class="{ active: activeConvId === c.id }"
-            @click="selectConv(c)"
-          >
-            <el-icon><ChatLineRound /></el-icon>
-            <span class="conv-title">{{ c.title }}</span>
-            <el-icon class="conv-del" @click.stop="delConv(c.id)"><Close /></el-icon>
-          </div>
-        </el-scrollbar>
-      </div>
-    </div>
-
-    <!-- Center: Chat -->
-    <div class="chat-center">
-      <div class="center-header">
-        <div class="ch-left">
-          <h3>{{ activeConv?.title || '新对话' }}</h3>
-          <span v-if="selectedPaperIds.length" class="ctx-badge">
-            <el-icon><Files /></el-icon> {{ selectedPaperIds.length }} 篇论文上下文
-          </span>
-        </div>
-        <el-button size="small" @click="startNewConv"><el-icon><Plus /></el-icon> 新对话</el-button>
-      </div>
-      <ChatPanel ref="chatPanelRef" :conversation="activeConv" />
-    </div>
-
-    <!-- Right: Params -->
-    <transition name="slide">
-      <div class="chat-right" v-if="showParams">
-        <ParamPanel @close="showParams = false" />
-      </div>
-    </transition>
-    <button
-      v-if="!showParams"
-      type="button"
-      class="param-reopen"
-      aria-label="打开请求参数"
-      @click="showParams = true"
+  <div class="chat-view" @keydown.esc="showParams = false; showSources = false">
+    <aside v-if="!compactSources" class="chat-left" aria-label="参考文献与历史对话">
+      <ChatSources
+        v-model:active-kb-id="activeKbId"
+        :selected-paper-ids="selectedPaperIds"
+        :active-conv-id="activeConvId"
+        @toggle-paper="toggleSelect"
+        @index-paper="doIndex"
+        @select-conversation="selectConv"
+        @delete-conversation="delConv" />
+    </aside>
+    <el-drawer
+      v-else
+      v-model="showSources"
+      direction="ltr"
+      size="min(310px, 90vw)"
+      :with-header="false"
+      destroy-on-close
+      class="paper-sources-drawer"
+      title="参考文献与历史对话"
+      aria-label="参考文献与历史对话"
     >
-      <el-icon aria-hidden="true"><Setting /></el-icon>
-    </button>
+      <ChatSources
+        v-model:active-kb-id="activeKbId"
+        :selected-paper-ids="selectedPaperIds"
+        :active-conv-id="activeConvId"
+        @toggle-paper="toggleSelect"
+        @index-paper="doIndex"
+        @select-conversation="selectConv"
+        @delete-conversation="delConv"
+        collapsible
+        @close="showSources = false"
+      />
+    </el-drawer>
+
+    <section class="chat-center" aria-label="论文问答">
+      <header class="center-header">
+        <div class="ch-left">
+          <h1 class="font-display">{{ activeConv?.title || '论文问答' }}</h1>
+          <span v-if="selectedPaperIds.length" class="ctx-badge"><el-icon aria-hidden="true"><Files /></el-icon> 已关联 {{ selectedPaperIds.length }} 篇论文</span>
+          <p v-else>围绕一篇或多篇论文，深入讨论。</p>
+        </div>
+        <div class="chat-actions">
+          <el-button class="sources-toggle" @click="showSources = !showSources" aria-label="选择参考文献" :aria-expanded="showSources" title="参考文献"><el-icon aria-hidden="true"><Files /></el-icon></el-button>
+          <el-button @click="startNewConv" class="new-conversation" aria-label="新建对话" title="新建对话"><el-icon aria-hidden="true"><Plus /></el-icon><span>新对话</span></el-button>
+          <el-button @click="showParams = !showParams" aria-label="对话设置" :aria-expanded="showParams" title="对话设置"><el-icon aria-hidden="true"><Setting /></el-icon></el-button>
+        </div>
+      </header>
+      <ChatPanel ref="chatPanelRef" :conversation="activeConv" @create="startNewConv" />
+    </section>
+
+    <el-drawer
+      v-model="showParams"
+      size="min(320px, 90vw)"
+      :with-header="false"
+      destroy-on-close
+      class="paper-settings-drawer"
+      title="对话设置"
+      aria-label="对话设置"
+    >
+      <ParamPanel @close="showParams = false" />
+    </el-drawer>
   </div>
 </template>
 
 <script setup lang="ts">
-import { ref, computed } from 'vue'
+import { ref, computed, onBeforeUnmount } from 'vue'
 import { ElMessageBox, ElMessage } from 'element-plus'
-import { ChatLineRound, Close, Files, Plus, Setting, CircleCheck, Loading, Download } from '@element-plus/icons-vue'
+import { Files, Plus, Setting } from '@element-plus/icons-vue'
 import ChatPanel from '../components/ChatPanel.vue'
 import ParamPanel from '../components/ParamPanel.vue'
+import ChatSources from '../components/ChatSources.vue'
 import { usePaperStore } from '../stores/paper'
 import { useChatStore, type Conversation } from '../stores/chat'
 
@@ -98,11 +80,18 @@ const chatStore = useChatStore()
 const activeKbId = ref(paperStore.knowledgeBases[0]?.id ?? 'default')
 const selectedPaperIds = ref<string[]>([])
 const activeConvId = ref('')
-const showParams = ref(true)
+const showParams = ref(false)
+const showSources = ref(false)
+const sourceMedia = window.matchMedia('(max-width: 980px)')
+const compactSources = ref(sourceMedia.matches)
+function updateSourceLayout(event: MediaQueryListEvent) {
+  compactSources.value = event.matches
+  if (!event.matches) showSources.value = false
+}
+sourceMedia.addEventListener('change', updateSourceLayout)
+onBeforeUnmount(() => sourceMedia.removeEventListener('change', updateSourceLayout))
 const chatPanelRef = ref<InstanceType<typeof ChatPanel>>()
 
-const kbPapers = computed(() => paperStore.getPapersByKb(activeKbId.value).value)
-const allConversations = computed(() => chatStore.conversations)
 const activeConv = computed(() => chatStore.conversations.find(c => c.id === activeConvId.value) ?? null)
 
 async function doIndex(paperId: string) {
@@ -125,11 +114,13 @@ async function startNewConv() {
   const title = `对话 ${chatStore.conversations.length + 1}`
   const conv = await chatStore.newConversation(title, [...selectedPaperIds.value])
   activeConvId.value = conv.id
+  showSources.value = false
 }
 
 function selectConv(c: Conversation) {
   activeConvId.value = c.id
   selectedPaperIds.value = [...c.paperIds]
+  showSources.value = false
 }
 
 async function delConv(id: string) {
@@ -141,136 +132,32 @@ async function delConv(id: string) {
 
 <style scoped>
 .chat-view { display: flex; height: 100%; overflow: hidden; position: relative; }
+.chat-left { width: 248px; flex-shrink: 0; min-height: 0; border-right: 1px solid var(--border); }
+.chat-center { flex: 1; display: flex; flex-direction: column; overflow: hidden; min-width: 0; container-type: inline-size; background: var(--bg-surface); }
+.center-header { display: flex; align-items: center; justify-content: space-between; gap: 20px; padding: 24px 28px; border-bottom: 1px solid var(--border); flex-shrink: 0; min-height: 100px; }
+.ch-left { min-width: 0; }
+.ch-left h1 { font-size: 25px; font-weight: 500; line-height: 1.3; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.ch-left p { font-size: 11px; color: var(--text-muted); margin-top: 8px; }
+.ctx-badge { display: flex; align-items: center; gap: 5px; font-size: 11px; color: var(--text-muted); margin-top: 8px; }
+.chat-actions { display: flex; align-items: center; gap: 7px; flex-shrink: 0; }
+.chat-actions .el-button { height: 32px; font-size: 12px; padding: 0 10px; }
+.chat-actions .sources-toggle { display: none; }
 
-.chat-left {
-  width: 280px;
-  min-width: 280px;
-  background: color-mix(in srgb, var(--bg-surface) 94%, transparent);
-  border-right: 1px solid var(--border);
-  display: flex;
-  flex-direction: column;
+:global(.paper-sources-drawer .el-drawer__body),
+:global(.paper-settings-drawer .el-drawer__body) { padding: 0; min-height: 0; overflow: hidden; }
+@media (max-width: 1280px) {
+  .chat-left { width: 230px; }
+  .center-header { padding: 22px; }
 }
-.left-header { padding: 14px; border-bottom: 1px solid var(--border); }
-.left-subheader {
-  display: flex;
-  justify-content: space-between;
-  padding: 10px 14px;
-  font-size: 12px;
-  color: var(--text-muted);
+@media (max-width: 980px) {
+  .chat-actions .sources-toggle { display: inline-flex; }
 }
-.selected-count { color: var(--accent); font-variant-numeric: tabular-nums; }
-.paper-list { flex: 1; padding: 0 8px; }
-.paper-list-item {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  padding: 10px;
-  border-radius: var(--radius-sm);
-  cursor: pointer;
-  margin-bottom: 2px;
-  border: 1px solid transparent;
-  transition:
-    background 0.15s var(--ease-out),
-    border-color 0.15s var(--ease-out);
+@media (max-width: 520px) {
+  .center-header { padding: 18px 16px; gap: 12px; min-height: 90px; }
+  .ch-left h1 { font-size: 22px; }
+  .ch-left p { font-size: 10px; }
+  .chat-actions { gap: 5px; }
+  .chat-actions .el-button { padding: 0 8px; }
+  .new-conversation span { display: none; }
 }
-.paper-list-item:hover { background: var(--bg-hover); }
-.paper-list-item.selected {
-  background: var(--accent-dim);
-  border-color: color-mix(in srgb, var(--accent) 30%, transparent);
-}
-.pli-info { display: flex; flex-direction: column; gap: 2px; overflow: hidden; flex: 1; min-width: 0; }
-.pli-title { font-size: 13px; color: var(--text-primary); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.pli-meta { font-size: 11px; color: var(--text-muted); }
-.pli-index { flex-shrink: 0; display: flex; align-items: center; }
-.index-done { color: var(--success); font-size: 14px; }
-.index-loading { color: var(--text-muted); font-size: 14px; }
-
-.left-footer { border-top: 1px solid var(--border); padding: 12px 8px; }
-.conv-list-label {
-  font-size: 11px;
-  color: var(--text-muted);
-  padding: 0 8px 8px;
-  text-transform: uppercase;
-  letter-spacing: 0.5px;
-}
-.conv-item {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  padding: 8px 10px;
-  border-radius: var(--radius-sm);
-  cursor: pointer;
-  font-size: 13px;
-  color: var(--text-secondary);
-  transition: background 0.15s var(--ease-out), color 0.15s var(--ease-out);
-}
-.conv-item:hover { background: var(--bg-hover); }
-.conv-item.active { background: var(--accent-dim); color: var(--accent); }
-.conv-title { flex: 1; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0; }
-.conv-del { opacity: 0; transition: opacity 0.15s var(--ease-out); }
-.conv-item:hover .conv-del { opacity: 1; }
-.conv-del:hover { color: var(--danger); }
-
-.chat-center { flex: 1; display: flex; flex-direction: column; overflow: hidden; min-width: 0; }
-.center-header {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  padding: 14px 20px;
-  border-bottom: 1px solid var(--border);
-  background: color-mix(in srgb, var(--bg-surface) 55%, transparent);
-}
-.ch-left { display: flex; align-items: center; gap: 12px; min-width: 0; }
-.center-header h3 {
-  font-size: 15px;
-  font-weight: 600;
-  color: var(--text-primary);
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-.ctx-badge {
-  display: flex;
-  align-items: center;
-  gap: 4px;
-  font-size: 12px;
-  color: var(--gold);
-  background: var(--gold-dim);
-  border: 1px solid color-mix(in srgb, var(--gold) 22%, transparent);
-  padding: 3px 8px;
-  border-radius: 6px;
-  white-space: nowrap;
-}
-
-.chat-right { width: 300px; min-width: 300px; }
-.param-reopen {
-  position: absolute;
-  right: 16px;
-  top: 16px;
-  z-index: 10;
-  width: 36px;
-  height: 36px;
-  border-radius: 8px;
-  background: var(--bg-elevated);
-  border: 1px solid var(--border);
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  cursor: pointer;
-  color: var(--text-secondary);
-  transition:
-    color 0.15s var(--ease-out),
-    border-color 0.15s var(--ease-out),
-    background 0.15s var(--ease-out);
-}
-.param-reopen:hover {
-  color: var(--accent);
-  border-color: var(--accent);
-  background: var(--accent-dim);
-}
-
-.slide-enter-active, .slide-leave-active {
-  transition: transform 0.2s var(--ease-out), opacity 0.2s var(--ease-out);
-}
-.slide-enter-from, .slide-leave-to { transform: translateX(100%); opacity: 0; }
 </style>

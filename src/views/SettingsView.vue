@@ -2,7 +2,7 @@
   <div class="settings-view">
     <header class="view-header">
       <h1 class="font-display">设置</h1>
-      <p class="header-desc">LLM 配置管理与本地数据</p>
+      <p class="header-desc">管理你的阅读模型与本地数据。</p>
     </header>
 
     <div class="settings-body">
@@ -11,8 +11,8 @@
       <section class="settings-card">
         <div class="card-title-row">
           <div>
-            <h3>LLM 配置</h3>
-            <p class="card-desc">可创建多个命名配置，分别用于对话和论文索引。所有请求直接从本地发往服务，不经过中间服务器。</p>
+            <h3>模型配置</h3>
+            <p class="card-desc">为精读、问答和索引分别配置合适的模型，随时切换使用。</p>
           </div>
           <el-button type="primary" size="small" @click="openNew">
             <el-icon><Plus /></el-icon> 新增配置
@@ -111,7 +111,7 @@
         <div class="about-mark" aria-hidden="true">P</div>
         <div>
           <h3>关于</h3>
-          <p class="card-desc">PaperMind · 本地论文阅读助手 · v0.1.0</p>
+          <p class="card-desc">PaperMind 0.1.0 — 你的本地论文阅读助手</p>
         </div>
       </section>
     </div>
@@ -327,32 +327,32 @@ async function clearData() {
   overflow: hidden;
 }
 .view-header {
-  padding: 22px 28px 18px;
+  padding: 34px 40px 26px;
   border-bottom: 1px solid var(--border);
   flex-shrink: 0;
 }
-.view-header h1 { font-size: 24px; font-weight: 700; text-wrap: balance; }
-.header-desc { margin-top: 4px; font-size: 13px; color: var(--text-muted); }
+.view-header h1 { font-size: 30px; font-weight: 500; text-wrap: balance; }
+.header-desc { margin-top: 10px; font-size: 12px; color: var(--text-muted); }
 
 .settings-body {
   flex: 1;
   overflow-y: auto;
-  padding: 24px 28px;
-  max-width: 760px;
+  padding: 28px 40px 40px;
+  width: 100%;
+  max-width: 1000px;
+  align-self: center;
 }
 
 .settings-card {
   background: var(--bg-surface);
   border: 1px solid var(--border);
   border-radius: var(--radius-md);
-  padding: 22px 24px;
-  margin-bottom: 14px;
-  box-shadow: var(--shadow-sm);
-  transition: border-color 0.15s var(--ease-out);
+  padding: 25px 28px;
+  margin-bottom: 18px;
+
 }
-.settings-card:hover { border-color: var(--border-light); }
 .settings-card h3 {
-  font-size: 15px;
+  font-size: 16px;
   font-weight: 600;
   color: var(--text-primary);
   margin-bottom: 6px;
@@ -360,7 +360,7 @@ async function clearData() {
 .card-desc {
   font-size: 13px;
   color: var(--text-muted);
-  line-height: 1.6;
+  line-height: 1.85;
   margin-bottom: 16px;
 }
 .card-title-row {
@@ -386,8 +386,8 @@ async function clearData() {
   transition: border-color 0.15s var(--ease-out);
 }
 .profile-row:hover { border-color: var(--border-light); }
-.profile-row.is-chat, .profile-row.is-index { border-color: var(--accent); background: var(--accent-dim); }
-.profile-info { display: flex; align-items: center; gap: 10px; min-width: 0; flex: 1; }
+.profile-row.is-chat, .profile-row.is-index { border-color: var(--border-light); background: var(--bg-base); box-shadow: inset 3px 0 0 var(--accent); }
+.profile-info { display: flex; align-items: center; flex-wrap: wrap; gap: 6px 10px; min-width: 0; flex: 1; }
 .profile-name { font-size: 14px; font-weight: 600; color: var(--text-primary); }
 .profile-sub { font-size: 12px; color: var(--text-muted); }
 .profile-badges { display: flex; gap: 4px; margin-left: 4px; }
@@ -399,7 +399,7 @@ async function clearData() {
   letter-spacing: 0.3px;
 }
 .badge-chat { background: var(--accent-dim); color: var(--accent); }
-.badge-index { background: rgba(212,168,75,0.14); color: var(--gold); }
+.badge-index { background: var(--gold-dim); color: var(--gold); }
 .profile-actions { display: flex; gap: 6px; flex-shrink: 0; }
 
 /* Settings rows */
@@ -407,7 +407,7 @@ async function clearData() {
   display: flex;
   align-items: center;
   gap: 16px;
-  margin-bottom: 14px;
+  margin-bottom: 18px;
 }
 .setting-row label { width: 80px; font-size: 13px; color: var(--text-secondary); flex-shrink: 0; }
 
@@ -426,16 +426,16 @@ async function clearData() {
 .about-mark {
   width: 40px;
   height: 40px;
-  border-radius: 11px;
+  border-radius: 3px 7px 7px 3px;
   display: flex;
   align-items: center;
   justify-content: center;
-  font-family: 'Playfair Display', serif;
+  font-family: var(--font-reading);
   font-weight: 700;
-  font-size: 18px;
-  color: #0c0e11;
-  background: linear-gradient(145deg, var(--accent-hover), var(--accent));
-  box-shadow: 0 6px 16px rgba(61, 184, 160, 0.18);
+  font-size: 26px;
+  color: var(--bg-surface);
+  background: var(--accent);
+  box-shadow: inset 3px 0 0 rgb(255 253 248 / 15%);
   flex-shrink: 0;
 }
 
@@ -464,5 +464,27 @@ async function clearData() {
   border-color: var(--accent);
   color: var(--accent);
   background: var(--accent-dim);
+}
+@media (max-width: 900px) {
+  .view-header { padding: 28px; }
+  .settings-body { padding: 24px 28px; }
+  .profile-info { align-items: flex-start; }
+  .profile-sub { overflow-wrap: anywhere; }
+}
+@media (max-width: 600px) {
+  .view-header { padding: 24px 20px 20px; }
+  .settings-body { padding: 18px 16px 28px; }
+  .settings-card { padding: 20px 18px; }
+  .card-title-row { flex-direction: column; gap: 12px; }
+  .profile-row { flex-wrap: wrap; gap: 14px; padding: 14px; }
+  .profile-info { flex-basis: 100%; }
+  .profile-sub { width: 100%; }
+  .profile-badges { margin-left: 0; }
+  .setting-row { flex-direction: column; align-items: flex-start; gap: 8px; }
+  .setting-row :deep(.el-select) { max-width: 100%; width: 100% !important; }
+  .abstract-token-row { flex-direction: column; align-items: stretch; }
+  .profile-form .form-row-two { grid-template-columns: 1fr; gap: 0; }
+  .action-row .el-button { font-size: 12px; }
+  .card-desc code { overflow-wrap: anywhere; }
 }
 </style>

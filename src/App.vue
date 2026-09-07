@@ -1,30 +1,51 @@
 <template>
-  <div class="app-shell">
+  <div class="app-shell" :class="{ 'is-reading': isReading }">
     <aside class="sidebar" aria-label="主导航">
-      <div class="sidebar-logo">
-        <span class="logo-mark" aria-hidden="true">P</span>
+      <router-link to="/library" class="sidebar-logo" aria-label="PaperMind 文献库" title="PaperMind 文献库">
+        <span class="logo-mark font-display" aria-hidden="true">P<span class="logo-bookmark" /></span>
         <div class="logo-copy">
           <span class="logo-text font-display">PaperMind</span>
-          <span class="logo-sub">本地论文助手</span>
+          <span class="logo-sub">阅读，让想法生长</span>
         </div>
-      </div>
+      </router-link>
 
       <nav class="sidebar-nav">
         <router-link
           v-for="item in navItems"
           :key="item.path"
           :to="item.path"
+          :title="item.label"
+          :aria-label="item.label"
           class="nav-item"
         >
           <el-icon aria-hidden="true"><component :is="item.icon" /></el-icon>
-          <span>{{ item.label }}</span>
+          <span class="nav-label">{{ item.label }}</span>
+          <span v-if="item.path === '/library' && paperStore.papers.length" class="nav-count tabular-nums">{{ paperStore.papers.length }}</span>
         </router-link>
       </nav>
 
+      <div v-if="readingPapers.length" class="reading-list">
+        <p class="reading-label">正在阅读</p>
+        <router-link
+          v-for="paper in readingPapers"
+          :key="paper.id"
+          :to="'/library/' + paper.id"
+          class="reading-link"
+          :title="paper.title || paper.fileName"
+        >
+          <el-icon aria-hidden="true"><Document /></el-icon>
+          <span>{{ paper.title || paper.fileName }}</span>
+        </router-link>
+      </div>
+
       <div class="sidebar-bottom">
-        <router-link to="/settings" class="nav-item">
+        <div class="workspace-note">
+          <span class="workspace-dot" aria-hidden="true" />
+          <span>本地工作区</span>
+        </div>
+        <router-link to="/settings" class="nav-item" title="设置" aria-label="设置">
           <el-icon aria-hidden="true"><Setting /></el-icon>
-          <span>设置</span>
+          <span class="nav-label">设置</span>
         </router-link>
       </div>
     </aside>
@@ -40,21 +61,25 @@
 </template>
 
 <script setup lang="ts">
-import { onMounted } from 'vue'
-import { Collection, ChatDotRound, Setting } from '@element-plus/icons-vue'
+import { computed, onMounted } from 'vue'
+import { useRoute } from 'vue-router'
+import { Collection, ChatDotRound, Document, Setting } from '@element-plus/icons-vue'
 import { usePaperStore } from './stores/paper'
 import { useChatStore } from './stores/chat'
 
 const paperStore = usePaperStore()
 const chatStore = useChatStore()
+const route = useRoute()
+const isReading = computed(() => route.path.startsWith('/library/'))
+const readingPapers = computed(() => paperStore.papers.filter(paper => paper.status === 'reading').slice(0, 4))
 
 onMounted(async () => {
   await Promise.all([paperStore.init(), chatStore.init()])
 })
 
 const navItems = [
-  { path: '/library', icon: Collection, label: '知识库' },
-  { path: '/chat', icon: ChatDotRound, label: '对话' },
+  { path: '/library', icon: Collection, label: '文献库' },
+  { path: '/chat', icon: ChatDotRound, label: '论文问答' },
 ]
 </script>
 
@@ -62,116 +87,114 @@ const navItems = [
 .app-shell {
   display: flex;
   height: 100vh;
-  width: 100vw;
+  height: 100dvh;
+  width: 100%;
   overflow: hidden;
 }
-
 .sidebar {
   width: var(--sidebar-width);
-  min-width: var(--sidebar-width);
-  background: color-mix(in srgb, var(--bg-surface) 92%, transparent);
+  flex-shrink: 0;
+  background: var(--bg-sidebar);
   border-right: 1px solid var(--border);
   display: flex;
   flex-direction: column;
-  backdrop-filter: blur(12px);
 }
-
 .sidebar-logo {
   display: flex;
   align-items: center;
   gap: 12px;
-  padding: 22px 18px 18px;
-  border-bottom: 1px solid var(--border);
+  margin: 30px 22px 34px;
+  text-decoration: none;
+  color: inherit;
 }
-
 .logo-mark {
-  width: 32px;
-  height: 32px;
-  background: linear-gradient(145deg, var(--accent-hover), var(--accent));
-  border-radius: 9px;
+  position: relative;
+  width: 34px;
+  height: 39px;
+  background: var(--accent);
+  border-radius: 3px 7px 7px 3px;
   display: flex;
   align-items: center;
   justify-content: center;
-  font-family: 'Playfair Display', serif;
-  font-size: 17px;
-  font-weight: 700;
-  color: #0c0e11;
+  font-size: 26px;
+  font-weight: 600;
+  color: var(--bg-surface);
   flex-shrink: 0;
   line-height: 1;
-  box-shadow: 0 0 0 1px rgba(61, 184, 160, 0.25), 0 6px 16px rgba(61, 184, 160, 0.18);
+  box-shadow: inset 3px 0 0 rgb(255 253 248 / 15%);
 }
-
-.logo-copy {
-  display: flex;
-  flex-direction: column;
-  gap: 1px;
-  min-width: 0;
+.logo-bookmark {
+  position: absolute;
+  top: -1px;
+  right: 7px;
+  width: 4px;
+  height: 10px;
+  background: #c8ae84;
+  clip-path: polygon(0 0, 100% 0, 100% 100%, 50% 78%, 0 100%);
 }
-
-.logo-text {
-  font-size: 17px;
-  font-weight: 600;
-  color: var(--text-primary);
-  letter-spacing: 0.2px;
-  line-height: 1.2;
-}
-
-.logo-sub {
-  font-size: 11px;
-  color: var(--text-muted);
-  letter-spacing: 0.2px;
-}
-
-.sidebar-nav {
-  flex: 1;
-  padding: 14px 10px;
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
-}
-
-.sidebar-bottom {
-  padding: 10px 10px 18px;
-  border-top: 1px solid var(--border);
-}
-
+.logo-copy { display: flex; flex-direction: column; gap: 6px; min-width: 0; }
+.logo-text { font-size: 22px; font-weight: 600; line-height: 1; letter-spacing: -0.7px; }
+.logo-sub { font-size: 10px; color: var(--text-muted); }
+.sidebar-nav { padding: 0 14px; display: flex; flex-direction: column; gap: 6px; }
 .nav-item {
   display: flex;
   align-items: center;
-  gap: 10px;
-  padding: 10px 12px;
-  border-radius: var(--radius-sm);
+  gap: 11px;
+  min-height: 43px;
+  padding: 10px 13px;
+  border-radius: 7px;
   color: var(--text-secondary);
   text-decoration: none;
-  font-size: 14px;
+  font-size: 13px;
   font-weight: 500;
-  transition:
-    background 0.15s var(--ease-out),
-    color 0.15s var(--ease-out),
-    box-shadow 0.15s var(--ease-out);
-  cursor: pointer;
-  position: relative;
+  transition: background 0.15s, color 0.15s;
 }
+.nav-item:hover { background: #e5ddd0; color: var(--text-primary); }
+.nav-item.router-link-active { background: var(--bg-surface); color: var(--accent); box-shadow: var(--shadow-sm); }
+.nav-item .el-icon { font-size: 18px; flex-shrink: 0; }
+.nav-label { flex: 1; }
+.nav-count { font-size: 11px; color: var(--text-muted); }
+.reading-list { margin: 34px 14px 0; min-height: 0; overflow-y: auto; }
+.reading-label { padding: 0 13px 10px; color: var(--text-muted); font-size: 11px; }
+.reading-link { display: flex; align-items: flex-start; gap: 9px; padding: 10px 13px; border-radius: 6px; color: var(--text-secondary); text-decoration: none; }
+.reading-link .el-icon { margin-top: 2px; flex-shrink: 0; font-size: 14px; }
+.reading-link span { font-size: 12px; line-height: 1.65; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; overflow-wrap: anywhere; }
+.reading-link:hover { background: var(--bg-hover); color: var(--accent); }
+.sidebar-bottom { margin-top: auto; padding: 20px 14px; }
+.workspace-note { display: flex; align-items: center; gap: 7px; padding: 12px 13px; margin-bottom: 6px; font-size: 11px; color: var(--text-muted); }
+.workspace-dot { width: 6px; height: 6px; border-radius: 50%; background: var(--success); }
+.main-content { flex: 1; min-width: 0; min-height: 0; overflow: hidden; display: flex; flex-direction: column; }
 
-.nav-item:hover {
-  background: var(--bg-hover);
-  color: var(--text-primary);
+.is-reading .sidebar { width: 72px; }
+.is-reading .sidebar-logo { margin: 25px auto 30px; }
+.is-reading .logo-copy,
+.is-reading .nav-label,
+.is-reading .nav-count,
+.is-reading .reading-list,
+.is-reading .workspace-note { display: none; }
+.is-reading .sidebar-nav, .is-reading .sidebar-bottom { padding-left: 12px; padding-right: 12px; }
+.is-reading .nav-item { justify-content: center; padding: 12px; }
+
+@media (max-width: 1050px) {
+  .sidebar { width: 184px; }
+  .sidebar-logo { margin-left: 16px; margin-right: 16px; gap: 10px; }
+  .logo-text { font-size: 20px; }
+  .sidebar-nav, .sidebar-bottom { padding-left: 10px; padding-right: 10px; }
 }
-
-.nav-item.router-link-active {
-  background: var(--accent-dim);
-  color: var(--accent);
-  box-shadow: inset 3px 0 0 var(--accent);
+@media (max-width: 760px) {
+  .sidebar, .is-reading .sidebar { width: 64px; }
+  .sidebar-logo, .is-reading .sidebar-logo { margin: 22px auto 26px; }
+  .logo-copy, .nav-label, .nav-count, .reading-list, .workspace-note { display: none; }
+  .sidebar-nav, .sidebar-bottom, .is-reading .sidebar-nav, .is-reading .sidebar-bottom { padding-left: 8px; padding-right: 8px; }
+  .nav-item { justify-content: center; padding: 12px; }
 }
-
-.nav-item .el-icon { font-size: 16px; }
-
-.main-content {
-  flex: 1;
-  overflow: hidden;
-  display: flex;
-  flex-direction: column;
-  min-width: 0;
-  background: transparent;
+@media (max-width: 520px) {
+  .app-shell { flex-direction: column; }
+  .sidebar, .is-reading .sidebar { width: 100%; height: 62px; flex-direction: row; align-items: center; border-right: 0; border-bottom: 1px solid var(--border); padding: 0 14px; }
+  .sidebar-logo, .is-reading .sidebar-logo { margin: 0 auto 0 0; }
+  .logo-mark { width: 29px; height: 33px; font-size: 23px; }
+  .sidebar-nav, .is-reading .sidebar-nav { flex-direction: row; padding: 0; gap: 6px; }
+  .sidebar-bottom, .is-reading .sidebar-bottom { margin: 0 0 0 6px; padding: 0; }
+  .nav-item { min-height: 40px; width: 42px; }
 }
 </style>
