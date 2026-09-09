@@ -1,5 +1,6 @@
 {
   "name": "papermind",
+  "productName": "PaperMind",
   "version": "0.1.0",
   "description": "",
   "main": "dist-electron/main.js",
@@ -9,7 +10,7 @@
     "npm": ">=10.0.0 <11"
   },
   "scripts": {
-    "dev": "vite",
+    "dev": "node scripts/dev.mjs",
     "build": "vue-tsc --noEmit && vite build && electron-builder",
     "preview": "vite preview",
     "typecheck": "vue-tsc --noEmit",
@@ -21,7 +22,7 @@
     "postinstall": "electron-rebuild -f -w better-sqlite3"
   },
   "devDependencies": {
-    "@electron/rebuild": "^3.7.2",
+    "@electron/rebuild": "^4.2.0",
     "@huggingface/transformers": "^3.8.1",
     "@types/better-sqlite3": "^7.6.13",
     "@types/markdown-it": "^14.1.2",
@@ -29,7 +30,7 @@
     "@vitejs/plugin-vue": "^5.2.4",
     "@vitest/ui": "^4.1.8",
     "@vue/test-utils": "^2.4.11",
-    "electron": "^31.0.0",
+    "electron": "^44.2.0",
     "electron-builder": "^24.0.0",
     "jsdom": "^29.1.1",
     "tsx": "^4.23.13",
@@ -42,7 +43,7 @@
   },
   "dependencies": {
     "@element-plus/icons-vue": "^2.3.2",
-    "better-sqlite3": "^12.10.0",
+    "better-sqlite3": "^13.0.3",
     "dompurify": "^3.4.12",
     "element-plus": "^2.14.1",
     "katex": "^0.18.1",
@@ -69,7 +70,8 @@
       "target": "AppImage"
     },
     "mac": {
-      "target": "dmg"
+      "target": "dmg",
+      "icon": "assets/papermind-icon.png"
     },
     "win": {
       "target": "nsis"

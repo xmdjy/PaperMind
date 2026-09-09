@@ -1,7 +1,7 @@
 <template>
   <div class="param-panel">
     <div class="param-header">
-      <h3>对话配置</h3>
+      <h3>对话设置</h3>
       <button type="button" class="collapse-btn" aria-label="收起面板" @click="$emit('close')">
         <el-icon aria-hidden="true"><DArrowRight /></el-icon>
       </button>
@@ -38,7 +38,7 @@
 
       <!-- Temperature -->
       <div class="param-section">
-        <label>Temperature <span class="val tabular-nums">{{ chatProfile?.temperature ?? 0.7 }}</span></label>
+        <label>回答发散度 <span class="val tabular-nums">{{ chatProfile?.temperature ?? 0.7 }}</span></label>
         <el-slider
           :model-value="chatProfile?.temperature ?? 0.7"
           @update:model-value="updateCurrent('temperature', $event)"
@@ -49,7 +49,7 @@
       <!-- Top-K -->
       <div class="param-section">
         <label>
-          Top-K
+          候选词范围（Top-K）
           <span class="val tabular-nums">{{ chatProfile?.topK === 0 ? '—' : chatProfile?.topK }}</span>
         </label>
         <el-slider
@@ -65,7 +65,7 @@
       <!-- 前往设置 -->
       <router-link to="/settings" class="settings-link">
         <el-icon><Setting /></el-icon>
-        前往设置中完整配置
+        管理模型配置
       </router-link>
     </el-scrollbar>
   </div>
@@ -92,7 +92,7 @@ function updateCurrent(key: 'temperature' | 'topK', value: number) {
   display: flex;
   flex-direction: column;
   height: 100%;
-  background: color-mix(in srgb, var(--bg-surface) 96%, transparent);
+  background: var(--bg-surface);
   border-left: 1px solid var(--border);
 }
 
@@ -100,7 +100,7 @@ function updateCurrent(key: 'temperature' | 'topK', value: number) {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding: 16px;
+  padding: 23px 22px;
   border-bottom: 1px solid var(--border);
 }
 .param-header h3 { font-size: 14px; font-weight: 600; color: var(--text-primary); }
@@ -121,7 +121,7 @@ function updateCurrent(key: 'temperature' | 'topK', value: number) {
 }
 .collapse-btn:hover { color: var(--text-primary); background: var(--bg-hover); }
 
-.param-body { flex: 1; padding: 16px; }
+.param-body { flex: 1; min-height: 0; padding: 24px 22px; }
 
 .param-section { margin-bottom: 20px; }
 .param-section label {
@@ -159,6 +159,7 @@ function updateCurrent(key: 'temperature' | 'topK', value: number) {
 }
 
 /* select option layout */
+:global(.el-select-dropdown__item:has(.opt-name)) { height: auto; min-height: 52px; padding-top: 7px; padding-bottom: 7px; line-height: 1.6; }
 .opt-name { font-size: 13px; font-weight: 500; color: var(--text-primary); display: block; }
 .opt-sub  { font-size: 11px; color: var(--text-muted); display: block; }
 
