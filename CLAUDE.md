@@ -1,6 +1,8 @@
 # PaperMind
 
 **变更记录**
+- 2026-09-09: 移除 `pageindex-adapted` 基线——上游 PageIndex 适配（Python 桥）端到端吞吐过低（推理模型逐题 agentic 检索），决策放弃：删 `bench/adapters/pageindex/`、`runner/pageindexQa.ts`、配置校验与 `upstreamCommit` meta 透传；强基线组保留 `hybrid-rerank` / `long-section-rag`（均已完成 qasper 179 篇全量）
+- 2026-09-08: 强基线矩阵（bench）——新增 `hybrid-rerank`（BM25+BGE-M3→RRF→交叉编码器重排）与 `long-section-rag`（章节内连续阅读）两条可评测基线：`bench/src/baselines/` 原语、共享引擎 `strongBaselineQa.ts`、冻结 4096 上下文预算的严格配置校验、configs/README/CLAUDE.md 同步
 - 2026-09-04: 新增 `bench/` 评测套件（QA 检索/答案 + 摘要 benchmark，配置矩阵消融，Node CLI）；RAG 管线抽出为 `src/utils/ragPipeline.ts` 纯函数以供评测复用
 - 2026-08-02T15:49:42: 增量文档刷新——补记多 LLM 配置（profiles，对话/索引可分开）、PageIndex 持久化（`paper_indexes` 表 + `index` IPC 命名空间）、`/abstract` 摘要（Hugging Face T5 模型）、Markdown + KaTeX 渲染管线；新增 `electron/db/` 与 `src/router/` 模块文档，修正面包屑与 Mermaid 链接
 - 2026-07-19T14:49:32: 前端 UI 美化（青绿主色、侧栏/知识库卡片/对话面板视觉升级）

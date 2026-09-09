@@ -4,13 +4,13 @@
  * 复用 src/utils/abstractSummarizer 的生产实现，评测与应用跑同一份代码。
  */
 import { summarizeAcademicText } from '../../../src/utils/abstractSummarizer'
-import type { BenchConfig, BenchResult, EvalSample, PerSampleRecord, SampleError } from '../types'
+import type { PaperMindConfig, BenchResult, EvalSample, PerSampleRecord, SampleError } from '../types'
 import { computeSummaryMetrics } from '../metrics/rouge'
 import { aggregate } from '../metrics/aggregate'
 
 export interface SummaryTaskArgs {
   samples: EvalSample[]
-  config: BenchConfig
+  config: PaperMindConfig
   hfToken: string
   /** 限制处理的论文数（每篇论文产一个摘要，与 QA runner 的「问题数」语义不同） */
   limit?: number

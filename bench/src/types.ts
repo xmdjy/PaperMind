@@ -37,15 +37,69 @@ export interface EvalSample {
  * 刻意 Omit externalContext：它会让 runRagPipeline 跳过改写与检索，
  * 一个语法合法的配置就能静默关掉正在被评测的整条链路，而指标照常输出数字。
  */
-export interface BenchConfig extends IndexOptions, Omit<RagOptions, 'externalContext'> {
+export interface PaperMindConfig extends IndexOptions, Omit<RagOptions, 'externalContext'> {
   name: string
+  kind?: 'papermind'
 }
+
+export interface TraditionalEmbeddingConfig {
+  model: string
+  revision: string
+  queryPrefix: string
+  normalize: true
+  maxLength: number
+}
+
+export interface TraditionalRagConfig {
+  name: string
+  kind: 'traditional-rag'
+  chunking: { tokenizer: 'bge-m3'; chunkSize: number; overlap: number }
+  retrieval: { algorithm: 'cosine'; topK: number; embedding: TraditionalEmbeddingConfig }
+    | { algorithm: 'bm25'; topK: number; k1: number; b: number }
+    | { algorithm: 'jaccard'; topK: number }
+  generationContext: { topK: number; maxTokens: number }
+}
+
+/**
+ * 强基线 1：hybrid-rerank——BM25 与 BGE-M3 双路召回 → RRF 融合 → 交叉编码器重排。
+ * 计划（2026-09-08-baseline-matrix §2.2）冻结的参数关系由 config.ts 校验器强制。
+ */
+export interface HybridRerankConfig {
+  name: string
+  kind: 'hybrid-rerank'
+  chunking: { tokenizer: 'bge-m3'; chunkSize: number; overlap: number }
+  retrieval: {
+    bm25: { topK: number; k1: number; b: number }
+    dense: { topK: number; embedding: TraditionalEmbeddingConfig }
+    rrf: { k: number; topK: number }
+    reranker: { model: string; revision: string; topK: number; maxLength: number }
+  }
+  generationContext: { topK: number; maxTokens: number }
+}
+
+/**
+ * 强基线 2：long-section-rag——BM25 召回锚点段 → 在所属章节内做连续扩展阅读。
+ * 连续区域是单一上下文单元，故 generationContext.topK 恒为 1（校验器强制）。
+ */
+export interface LongSectionRagConfig {
+  name: string
+  kind: 'long-section-rag'
+  anchors: { tokenizer: 'bge-m3'; chunkSize: number; overlap: number }
+  retrieval: { algorithm: 'bm25'; topK: number; k1: number; b: number }
+  generationContext: { topK: number; maxTokens: number }
+}
+
+export type BenchConfig = PaperMindConfig | TraditionalRagConfig | HybridRerankConfig | LongSectionRagConfig
+
+/** 报表分组口径：classic=既有对照组，strong=强基线（计划 §0：三条新基线同组）。 */
+export type BaselineFamily = 'classic' | 'strong'
 
 /** 配置文件形态：matrix 各字段取值数组，展开为笛卡尔积。 */
 export interface ConfigFile {
   name: string
+  kind?: 'papermind'
   /** 键收敛到 BenchConfig 的可调字段，防止拼错的键静默失效 */
-  matrix: Partial<Record<Exclude<keyof BenchConfig, 'name'>, Array<number | boolean>>>
+  matrix: Partial<Record<Exclude<keyof PaperMindConfig, 'name' | 'kind'>, Array<number | boolean>>>
 }
 
 export interface SampleError {
@@ -114,6 +168,18 @@ export interface BenchResult {
     cacheMisses?: number
     /** 无请求时为 0，不能 NaN */
     cacheHitRate?: number
+    /** rag 为生产 RAG；full-context 为整篇论文直投 LLM 的无检索基线。 */
+    mode?: 'rag' | 'full-context'
+    /** 请求上限是实验口径的一部分，尤其影响 full-context 与 judge。 */
+    requestTimeoutMs?: number
+    generationMaxTokens?: number
+    refusalPatternVersion?: string
+    rubricVersion?: string
+    retrievalAlgorithm?: 'papermind-llm' | 'cosine' | 'bm25' | 'jaccard' | 'none' | 'hybrid-rerank' | 'long-section-rag'
+    /** 基线家族（报表分组用），新基线必须标注，旧配置缺省由报表按 kind 推断 */
+    baselineFamily?: BaselineFamily
+    /** 候选/上下文粒度自证：如 '512-token passage'、'contiguous section region'、'structure node' */
+    candidateGranularity?: string
     /** unanswerableAccuracy 的判定口径，避免两种口径的数字被混着对比 */
     unanswerableMethod?: 'pattern' | 'judge'
     /** 缓存模式：normal 读写缓存；bypass（--no-cache）只跳过读，不覆写已有缓存文件 */

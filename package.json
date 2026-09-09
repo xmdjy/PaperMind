@@ -23,6 +23,7 @@
   },
   "devDependencies": {
     "@electron/rebuild": "^4.2.0",
+    "@huggingface/transformers": "^3.8.1",
     "@types/better-sqlite3": "^7.6.13",
     "@types/markdown-it": "^14.1.2",
     "@types/node": "^26.4.1",

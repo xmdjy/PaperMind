@@ -6,12 +6,12 @@
  */
 import { buildPageIndex, type IndexNode, type IndexOptions } from '../../../src/utils/pageIndex'
 import { runRagPipeline, type RagOptions } from '../../../src/utils/ragPipeline'
-import type { BenchConfig, BenchResult, EvalSample, PaperTimingRecord, PerSampleRecord, SampleError } from '../types'
+import type { PaperMindConfig, BenchResult, EvalSample, PaperTimingRecord, PerSampleRecord, PipelineTiming, SampleError } from '../types'
 import type { LlmClient } from '../llmClient'
 import { computeRetrievalMetrics, estimateTokens, expandPages } from '../metrics/retrieval'
 import { answerF1, isRefusal, REFUSAL_PATTERN_VERSION } from '../metrics/answerF1'
-import { judgeAnswer, judgeUnanswerable } from '../metrics/judge'
-import { aggregate, metricSampleCounts, withLatencyStats, withPercentiles } from '../metrics/aggregate'
+import { judgeAnswer, judgeUnanswerable, RUBRIC_VERSION } from '../metrics/judge'
+import { aggregate, metricSampleCounts, renameQaRates, withLatencyStats, withPercentiles } from '../metrics/aggregate'
 
 /** 与 src/stores/chat.ts 的 DEFAULT_PROFILE.systemPrompt 保持一致的字面值。 */
 export const DEFAULT_SYSTEM_PROMPT =
@@ -24,7 +24,7 @@ export interface QaTaskDeps {
 
 export interface QaTaskArgs {
   samples: EvalSample[]
-  config: BenchConfig
+  config: PaperMindConfig
   client: LlmClient
   systemPrompt: string
   /**
@@ -46,7 +46,7 @@ export interface QaTaskArgs {
 }
 
 /** 只透传 config 中显式给出的分块字段，未设置的字段让生产代码用默认值。 */
-function indexOptions(config: BenchConfig): IndexOptions {
+function indexOptions(config: PaperMindConfig): IndexOptions {
   const out: IndexOptions = {}
   if (config.chunkPages !== undefined) out.chunkPages = config.chunkPages
   if (config.minSectionPages !== undefined) out.minSectionPages = config.minSectionPages
@@ -56,7 +56,7 @@ function indexOptions(config: BenchConfig): IndexOptions {
 }
 
 /** 只透传 config 中显式给出的检索字段（externalContext 已被 BenchConfig Omit，永不传入）。 */
-function ragOptions(config: BenchConfig): RagOptions {
+function ragOptions(config: PaperMindConfig): RagOptions {
   const out: RagOptions = {}
   if (config.topK !== undefined) out.topK = config.topK
   if (config.minScore !== undefined) out.minScore = config.minScore
@@ -175,6 +175,8 @@ export async function runQaTask(args: QaTaskArgs): Promise<BenchResult> {
           ragOptions(config),
           { now },
         )
+        // timing 是 benchmark 与生产 pipeline 的硬契约；必须在任何 judge 调用前验证。
+        assertTiming(result.timing)
 
         const retrieval = result.retrievals[0]
         const metrics: Record<string, number> = {
@@ -254,19 +256,6 @@ export async function runQaTask(args: QaTaskArgs): Promise<BenchResult> {
         }
 
         const { timing } = result
-        // 时延不变量：timing 必须存在，且四个字段均为有限非负数。
-        // 缺失或非法是评测口径漂移（生产 pipeline 与评测契约不一致），而非样本失败，
-        // 直接抛 TimingInvariantViolation 让整轮失效——绝不能把缺 timing 的题静默当成功样本，
-        // 否则后续分位数会静默基于部分成功题计算
-        if (
-          !timing
-          || !Number.isFinite(timing.queryRewriteLatencyMs) || timing.queryRewriteLatencyMs < 0
-          || !Number.isFinite(timing.retrievalLatencyMs) || timing.retrievalLatencyMs < 0
-          || !Number.isFinite(timing.answerGenerationLatencyMs) || timing.answerGenerationLatencyMs < 0
-          || !Number.isFinite(timing.queryEndToEndLatencyMs) || timing.queryEndToEndLatencyMs < 0
-        ) {
-          throw new TimingInvariantViolation()
-        }
 
         perSample.push({
           id: question.id,
@@ -305,7 +294,7 @@ export async function runQaTask(args: QaTaskArgs): Promise<BenchResult> {
   // 重命名 0/1 指标的聚合结果为「率」，让报表列名自解释；
   // withLatencyStats 追加既有 latencyP50/P95（与 llmNetworkLatency* 同值，deprecated 待移除）
   const metrics = withPercentiles(
-    withLatencyStats(renameRates(raw), client.latencies()),
+    withLatencyStats(renameQaRates(raw), client.latencies()),
     collectTimingValues(perSample, perPaper, client),
   )
 
@@ -324,6 +313,9 @@ export async function runQaTask(args: QaTaskArgs): Promise<BenchResult> {
       // 无请求时为 0，不能 NaN
       cacheHitRate: cacheHits + cacheMisses > 0 ? cacheHits / (cacheHits + cacheMisses) : 0,
       gitSha,
+      refusalPatternVersion: REFUSAL_PATTERN_VERSION,
+      rubricVersion: RUBRIC_VERSION,
+      retrievalAlgorithm: 'papermind-llm',
       completed: perSample.length,
       total,
       ...(sawUnanswerable
@@ -353,6 +345,14 @@ class TimingInvariantViolation extends Error {
     super('runRagPipeline 返回的 timing 缺失，或存在非有限/负值的字段')
     this.name = 'TimingInvariantViolation'
   }
+}
+
+function assertTiming(timing: PipelineTiming | undefined): asserts timing is PipelineTiming {
+  if (!timing
+    || !Number.isFinite(timing.queryRewriteLatencyMs) || timing.queryRewriteLatencyMs < 0
+    || !Number.isFinite(timing.retrievalLatencyMs) || timing.retrievalLatencyMs < 0
+    || !Number.isFinite(timing.answerGenerationLatencyMs) || timing.answerGenerationLatencyMs < 0
+    || !Number.isFinite(timing.queryEndToEndLatencyMs) || timing.queryEndToEndLatencyMs < 0) throw new TimingInvariantViolation()
 }
 
 /**
@@ -393,23 +393,6 @@ function collectTimingValues(
   }
   values.llmNetworkLatency.push(...client.latencies())
   return values
-}
-
-/** evidenceHit → evidenceHitRate 等；均值本身就是比率，只是改个名。 */
-function renameRates(metrics: Record<string, number>): Record<string, number> {
-  const renames: Record<string, string> = {
-    evidenceHit: 'evidenceHitRate',
-    degraded: 'degradedRate',
-    rewrite: 'rewriteRate',
-    contextTruncated: 'contextTruncatedRate',
-    partialScoreCoverage: 'partialScoreCoverageRate',
-    llmCalls: 'llmCallsPerQuery',
-  }
-  const out: Record<string, number> = {}
-  for (const [key, value] of Object.entries(metrics)) {
-    out[renames[key] ?? key] = value
-  }
-  return out
 }
 
 export { REFUSAL_PATTERN_VERSION }

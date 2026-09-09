@@ -44,6 +44,19 @@ export function metricSampleCounts(records: PerSampleRecord[]): Record<string, n
   return counts
 }
 
+/** QA runner 共用的展示/结果契约键名。 */
+export function renameQaRates(metrics: Record<string, number>): Record<string, number> {
+  const names: Record<string, string> = {
+    evidenceHit: 'evidenceHitRate',
+    degraded: 'degradedRate',
+    rewrite: 'rewriteRate',
+    contextTruncated: 'contextTruncatedRate',
+    partialScoreCoverage: 'partialScoreCoverageRate',
+    llmCalls: 'llmCallsPerQuery',
+  }
+  return Object.fromEntries(Object.entries(metrics).map(([key, value]) => [names[key] ?? key, value]))
+}
+
 /**
  * 兼容包装：输出既有 latencyP50/P95（deprecated，下一发布周期删除，空数组仍记 0 与历史契约一致），
  * 再追加 llmNetworkLatencyP50Ms/P95Ms 让口径以 Ms 后缀字段为准；网络无真实请求时不产生 Ms 字段，
