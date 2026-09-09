@@ -1,4 +1,5 @@
 import type { EmbeddingProvider, TextTokenizer } from './types'
+import { applyHfEndpoint } from '../hub'
 
 export function normalize(vector: number[]): number[] {
   const norm = Math.sqrt(vector.reduce((sum, n) => sum + n * n, 0))
@@ -8,6 +9,7 @@ export function normalize(vector: number[]): number[] {
 
 export async function createBgeM3Tokenizer(options: { model: string; revision: string; cacheDir?: string }): Promise<TextTokenizer> {
   const transformers = await import('@huggingface/transformers')
+  applyHfEndpoint(transformers)
   if (options.cacheDir) (transformers.env as { cacheDir?: string }).cacheDir = options.cacheDir
   const tokenizer = await transformers.AutoTokenizer.from_pretrained(options.model, { revision: options.revision })
   return { tokenize: (text) => tokenizer.tokenize(text) }
@@ -16,6 +18,7 @@ export async function createBgeM3Tokenizer(options: { model: string; revision: s
 /** 仅本文件接触 Transformers；动态导入避免非 cosine benchmark 加载大模型运行时。 */
 export async function createBgeM3Provider(options: { model: string; revision: string; maxLength: number; cacheDir?: string }): Promise<{ provider: EmbeddingProvider; tokenizer: TextTokenizer }> {
   const transformers = await import('@huggingface/transformers')
+  applyHfEndpoint(transformers)
   const env = transformers.env as { cacheDir?: string }
   if (options.cacheDir) env.cacheDir = options.cacheDir
   const tokenizer = await transformers.AutoTokenizer.from_pretrained(options.model, { revision: options.revision })

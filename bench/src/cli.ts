@@ -15,6 +15,8 @@ import { loadSmokeDataset } from './datasets/smoke'
 import { runQaTask, DEFAULT_SYSTEM_PROMPT } from './runner/qa'
 import { runFullContextQaTask } from './runner/fullContextQa'
 import { runTraditionalRagQaTask } from './runner/traditionalRagQa'
+import { runHybridRerankQaTask } from './runner/hybridRerankQa'
+import { runLongSectionQaTask } from './runner/longSectionQa'
 import { runSummaryTask } from './runner/summary'
 import { renderReport, renderComparison } from './report'
 import { benchPath } from './paths'
@@ -99,11 +101,14 @@ const judgeModel = process.env.BENCH_JUDGE_MODEL
 const sha = gitSha()
 const configs = await loadConfigs(args.config)
 // 不支持的组合必须在加载数据、发任何 LLM 请求或写结果前失败。
-if ((args.task === 'summary' || args.task === 'all') && configs.some(config => config.kind === 'traditional-rag')) {
-  throw new Error('传统 RAG 不支持 summary task')
+// 新基线（hybrid-rerank / long-section-rag）是 QA 专有对照组，同样不支持摘要。
+if ((args.task === 'summary' || args.task === 'all') && configs.some(config => config.kind !== 'papermind')) {
+  throw new Error('summary task 只接受 PaperMind 配置')
 }
-if (args.mode === 'full-context' && configs.some(config => config.kind === 'traditional-rag')) {
-  throw new Error('--mode full-context 不接受 traditional-rag 配置；请使用 PaperMind 配置名')
+// full-context 模式绕过检索配置，只对 PaperMind 管线有意义；检索型基线（传统 RAG
+// 与强基线）在 full-context 下跑出的数字与自身配置无关，必须拒绝而非静默跑错对象
+if (args.mode === 'full-context' && configs.some(config => config.kind !== 'papermind')) {
+  throw new Error('--mode full-context 只接受 PaperMind 配置；检索型基线请直接用对应 --config')
 }
 const samples = await loadDatasets(args.dataset)
 mkdirSync(RESULTS_DIR(), { recursive: true })
@@ -184,7 +189,11 @@ for (const config of configs) {
         ? await runFullContextQaTask({ ...taskArgs, config })
         : config.kind === 'traditional-rag'
           ? await runTraditionalRagQaTask({ ...taskArgs, config })
-          : await runQaTask({ ...taskArgs, config })
+          : config.kind === 'hybrid-rerank'
+            ? await runHybridRerankQaTask({ ...taskArgs, config })
+            : config.kind === 'long-section-rag'
+              ? await runLongSectionQaTask({ ...taskArgs, config })
+              : await runQaTask({ ...taskArgs, config })
       // --no-cache 当前只跳过读缓存，不覆写已有缓存文件（llmClient 待后续优化），如实记录口径
       result.meta.cacheMode = args.useCache ? 'normal' : 'bypass'
       result.meta.mode = args.mode

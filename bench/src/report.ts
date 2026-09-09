@@ -83,6 +83,8 @@ export function renderReport(
   lines.push(`- 模型：\`${first.meta.model}\``)
   if (first.meta.judgeModel) lines.push(`- Judge 模型：\`${first.meta.judgeModel}\``)
   lines.push(`- 代码版本：\`${first.meta.gitSha}\``)
+  if (first.meta.baselineFamily) lines.push(`- 基线家族：\`${first.meta.baselineFamily}\``)
+  if (first.meta.candidateGranularity) lines.push(`- 候选/上下文粒度：\`${first.meta.candidateGranularity}\``)
   lines.push(`- 时间：${first.meta.timestamp}`)
   lines.push(`- 主指标：\`${primary}\`（加粗行为最优）`)
   if (first.meta.unanswerableMethod) {
@@ -102,8 +104,8 @@ export function renderReport(
   const timingBlock = renderTimingSection(results)
   if (timingBlock.length > 0) lines.push(...timingBlock, '')
 
-  lines.push(`| 配置 | 检索算法 | 完成 | ${metricNames.join(' | ')} |`)
-  lines.push(`| --- | --- | --- | ${metricNames.map(() => '---').join(' | ')} |`)
+  lines.push(`| 配置 | 家族 | 检索算法 | 完成 | ${metricNames.join(' | ')} |`)
+  lines.push(`| --- | --- | --- | --- | ${metricNames.map(() => '---').join(' | ')} |`)
   results.forEach((r, i) => {
     const cells = metricNames.map(n => {
       const v = r.metrics[n]
@@ -111,7 +113,7 @@ export function renderReport(
       return i === bestIndex && n === primary ? `**${fmt(v)}**` : fmt(v)
     })
     const label = i === bestIndex ? `**${r.config.name}**` : r.config.name
-    lines.push(`| ${label} | ${r.meta.retrievalAlgorithm ?? '—'} | ${r.meta.completed}/${r.meta.total} | ${cells.join(' | ')} |`)
+    lines.push(`| ${label} | ${r.meta.baselineFamily ?? '—'} | ${r.meta.retrievalAlgorithm ?? '—'} | ${r.meta.completed}/${r.meta.total} | ${cells.join(' | ')} |`)
   })
   lines.push('')
 

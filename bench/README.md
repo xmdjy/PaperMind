@@ -16,6 +16,11 @@ export BENCH_LLM_BASE_URL=https://api.openai.com/v1
 export BENCH_JUDGE_MODEL=gpt-4o         # 仅 --judge 时需要
 export HF_TOKEN=hf_...                  # 仅摘要任务需要
 export HF_MODEL=Bashaarat1/t5-small-arxiv-summarizer  # 可选，覆盖摘要模型（此为默认值）
+
+# Hugging Face 模型/分词器下载（BGE-M3、交叉编码器重排器）走镜像站：
+export HF_ENDPOINT=https://hf-mirror.com
+# GitHub 克隆等依赖下载走本地代理（只放执行环境，绝不写进提交的配置或源码）：
+export HTTP_PROXY=http://127.0.0.1:7897 HTTPS_PROXY=http://127.0.0.1:7897
 ```
 
 评测固定 `temperature=0`，与生产 profile 的 0.7 不同 —— 分数必须可复现。
@@ -43,6 +48,8 @@ npm run bench -- --task qa --dataset smoke --limit 5      # 快速迭代
 npm run bench -- --task qa --judge                        # 加 LLM-as-judge
 npm run bench -- --task qa --mode full-context             # 无检索全文直投基线
 npm run bench -- --task qa --config rag-bm25               # 传统 BM25 基线
+npm run bench -- --task qa --config hybrid-rerank          # 强基线：BM25+BGE-M3 → RRF → 交叉编码器重排
+npm run bench -- --task qa --config long-section-rag       # 强基线：BM25 锚点 + 章节内连续阅读
 npm run bench -- --compare results/a.json results/b.json  # 对比两次结果
 ```
 
@@ -71,6 +78,22 @@ npm run bench -- --compare results/a.json results/b.json  # 对比两次结果
 `emptyRate` 高意味着 HF 端点在返回空串，而非模型质量差 —— 这两种情况必须分开看。注意：生产 `callAbstractModel` 对空返回会抛错，真实跑分时空串多落在 errors[] 而非 emptyRate；emptyRate 主要捕捉「返回了空白串」的场景。
 
 **管线诊断** —— `degradedRate`、`rewriteRate`、`llmCallsPerQuery`、`leafCount`、`latencyP50` / `latencyP95`。`leafCount` 为均值（分布可由结果 JSON 的 perSample 导出 p50/p95）；`semanticChunkRate` 未实现（可由 perSample 的分块信息后续补充）
+
+## 基线分组（2026-09-08 强基线矩阵）
+
+| 组 | 行 | 说明 |
+|---|---|---|
+| Classic | full-context / jaccard / bm25 / cosine | 既有对照组，口径见上文 |
+| Strong | `hybrid-rerank`、`long-section-rag` | 强基线组（计划 §0）：成熟检索栈、结构化阅读 |
+| Primary | PaperMind 当前管线 | 被评测的生产方法 |
+
+**强基线共同契约**（计划 `docs/superpowers/plans/2026-09-08-baseline-matrix.md` §1 冻结）：与所有基线同一份数据集/原文/原始问题/最终作答模型/4096 token 上下文预算/指标与错误口径；无查询改写，单个候选不截断，预算不足整段停止。
+
+**hybrid-rerank**：512/128 分块 → BM25(top20) 与 BGE-M3(top20) 独立召回 → RRF(k=60) 融合 top40 → 交叉编码器重排 → 预算内选 ≤5 段。MRR 在「重排前缀 + 融合尾部」的完整最终次序上计算。重排器权重为 `BAAI/bge-reranker-v2-m3`；官方仓库无 ONNX 权重，配置 pin 的是其 ONNX 转换 `rozgo/bge-reranker-v2-m3`（revision `fbd57b17`，单 logit 输出与原模型一致；权重在仓库根目录、>2GB 外部数据文件，provider 已按此加载）——这是**打包来源差异**，不是换模型，报表与结果 JSON 如实记录。**已验证**（2026-09-08，`bench/scripts/verifyReranker.ts`）：模型加载、句对编码、相关对得分 +5.54 > 无关对 −10.98。
+
+**long-section-rag**：确定性章节边界（标题正则，无 LLM，保留页号映射）→ BM25 锚点段(top10) → 最高排名锚点在所属章节内以锚点为中心连续扩展至 4096 token，绝不跨章节；最佳锚点不可用时按名次取下一个（确定性 fallback）。连续区域是单一上下文单元。
+
+**模型下载**：所有 Hugging Face 下载必须 `HF_ENDPOINT=https://hf-mirror.com`（见「准备」；transformers.js 不读该环境变量，bench 在加载点显式设置 `env.remoteHost`，见 `bench/src/hub.ts`）。镜像失败时不得静默换模型/revision。模型缓存于 `bench/cache/models/`（BGE-M3 与重排器的 2.3GB 外部数据权重已下载并经 SHA-256 对齐 LFS OID 验证；`verifyTokenizer.ts` / `verifyEmbedding.ts` / `verifyReranker.ts` 可复验）。
 
 ## 已知局限
 
