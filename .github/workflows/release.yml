@@ -55,6 +55,9 @@ jobs:
       - name: Verify Node security baseline
         run: node scripts/check-runtime.mjs
 
+      - name: Use pinned npm version
+        run: npm install --global npm@10.9.4 --ignore-scripts
+
       # Linux 需要 fuse（AppImage 运行时依赖）及原生构建工具
       - name: Install Linux build dependencies
         if: runner.os == 'Linux'
