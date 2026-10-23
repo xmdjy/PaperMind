@@ -31,6 +31,36 @@ afterEach(() => {
 })
 
 describe('reader conversation lifecycle', () => {
+  it('restores a requested conversation only for its paper, including query-only navigation', async () => {
+    const pinia = createPinia()
+    const paperStore = usePaperStore(pinia)
+    const chatStore = useChatStore(pinia)
+    paperStore.papers = papers.map(paper => ({ ...paper }))
+    paperStore.loaded = true
+    chatStore.loaded = true
+    chatStore.conversations = [
+      { id: 'old', title: 'Old', paperIds: ['a'], createdAt: 1, messages: [{ id: 'm1', role: 'user', content: 'Old', timestamp: 2 }] },
+      { id: 'recent', title: 'Recent', paperIds: ['a'], createdAt: 0, messages: [{ id: 'm2', role: 'user', content: 'Recent', timestamp: 20 }] },
+      { id: 'foreign', title: 'Foreign', paperIds: ['b'], createdAt: 99, messages: [] },
+    ]
+    vi.mocked(window.db.paper.contentUrl).mockResolvedValue('papermind-paper://paper/a')
+    const router = createRouter({ history: createMemoryHistory(), routes: [{ path: '/library/:id', component: ReaderView }] })
+    await router.push('/library/a?conversation=recent')
+    wrapper = shallowMount(ReaderView, { global: { plugins: [pinia, router], stubs: { ElButton: true, ElIcon: true, ElSelect: true, ElOption: true, ElEmpty: true } } })
+    await flushPromises()
+    expect(wrapper.findComponent(ChatPanel).props('conversation')?.id).toBe('recent')
+    await router.push('/library/a?conversation=old')
+    await flushPromises()
+    expect(wrapper.findComponent(ChatPanel).props('conversation')?.id).toBe('old')
+    await router.push('/library/a?conversation=foreign')
+    await flushPromises()
+    expect(wrapper.findComponent(ChatPanel).props('conversation')?.id).toBe('recent')
+    expect(wrapper.text()).toContain('会话')
+    await router.push('/library/a')
+    await flushPromises()
+    expect(wrapper.findComponent(ChatPanel).props('conversation')?.id).toBe('old')
+  })
+
   it('places the summary tab between questions and notes', async () => {
     const pinia = createPinia()
     const paperStore = usePaperStore(pinia)

@@ -63,7 +63,7 @@
 <script setup lang="ts">
 import { computed, onMounted } from 'vue'
 import { useRoute } from 'vue-router'
-import { Collection, ChatDotRound, Document, Link, Setting } from '@element-plus/icons-vue'
+import { Collection, ChatDotRound, Document, Link, Setting, Star } from '@element-plus/icons-vue'
 import { usePaperStore } from './stores/paper'
 import { useChatStore } from './stores/chat'
 
@@ -73,7 +73,7 @@ const paperMindWordmark = new URL('../assets/brand/papermind-wordmark.svg', impo
 const paperStore = usePaperStore()
 const chatStore = useChatStore()
 const route = useRoute()
-const isReading = computed(() => route.path.startsWith('/library/') || route.path === '/web-preview')
+const isReading = computed(() => route.path.startsWith('/library/') || route.path === '/web-preview' || route.path === '/reading-map')
 const readingPapers = computed(() => paperStore.papers.filter(paper => paper.status === 'reading').slice(0, 4))
 
 onMounted(async () => {
@@ -81,6 +81,7 @@ onMounted(async () => {
 })
 
 const navItems = [
+  { path: '/reading-map', icon: Star, label: '阅读星图' },
   { path: '/library', icon: Collection, label: '文献库' },
   { path: '/web-preview', icon: Link, label: '网页问答' },
   { path: '/chat', icon: ChatDotRound, label: '论文问答' },

@@ -6,6 +6,7 @@ import { createPinia, setActivePinia } from 'pinia'
 import App from '../App.vue'
 import router from '../router'
 import { ElMessageBox } from 'element-plus'
+import { createMemoryHistory, createRouter } from 'vue-router'
 
 const emptyState: PreviewState = {
   url: '', loading: false, canGoBack: false, canGoForward: false,
@@ -78,6 +79,148 @@ afterEach(() => {
 })
 
 describe('HTML preview page', () => {
+  it('keeps local history failure and retry visible after a live native view was visible', async () => {
+    const routeRouter = createRouter({ history: createMemoryHistory(), routes: [{ path: '/web-preview', component: WebPreviewView }] })
+    await routeRouter.push('/web-preview')
+    wrapper = mount(WebPreviewView, { global: { plugins: [routeRouter] } })
+    await flushPromises()
+    pushState?.({ ...emptyState, visible: true, url: 'https://example.org/live' })
+    await routeRouter.push('/web-preview?page=page-1')
+    await flushPromises()
+    expect(wrapper.get('[data-action="retry-history"]').isVisible()).toBe(true)
+    pushState?.({ ...emptyState, visible: true, url: 'https://example.org/live' })
+    await flushPromises()
+    expect(wrapper.get('[role="alert"]').text()).toContain('不存在')
+    vi.mocked(window.db.webQa.listPages).mockRejectedValueOnce(new Error('local history unavailable'))
+    await wrapper.get('[data-action="retry-history"]').trigger('click')
+    await flushPromises()
+    expect(wrapper.get('[role="alert"]').text()).toContain('local history unavailable')
+    vi.mocked(window.db.webQa.listPages).mockResolvedValue([page])
+    await wrapper.get('[data-action="retry-history"]').trigger('click')
+    await flushPromises()
+    expect(wrapper.text()).toContain('离线正文')
+    expect(wrapper.find('[data-action="retry-history"]').exists()).toBe(false)
+  })
+
+  it('enables new-session only after a deferred route history has restored its source', async () => {
+    const session = { id: 'saved', pageId: page.id, snapshotId: cached.id, title: page.title, finalUrl: page.canonicalUrl, capturedAt: 1, byteLength: 80, createdAt: 1, updatedAt: 2, firstQuestion: 'Saved question' }
+    vi.mocked(window.db.webQa.listPages).mockResolvedValue([page])
+    let finish!: (sessions: typeof session[]) => void
+    vi.mocked(window.db.webQa.listSessions).mockReturnValueOnce(new Promise(resolve => { finish = resolve })).mockResolvedValue([session])
+    vi.mocked(window.db.webQa.getSession).mockResolvedValue({ ...session, messages: [{ id: 'a', sessionId: session.id, role: 'assistant', content: 'Saved answer', status: 'completed', error: '', modelId: '', createdAt: 2 }] })
+    const routeRouter = createRouter({ history: createMemoryHistory(), routes: [{ path: '/web-preview', component: WebPreviewView }] })
+    await routeRouter.push('/web-preview?page=page-1')
+    wrapper = mount(WebPreviewView, { global: { plugins: [routeRouter] } })
+    await flushPromises()
+    expect(wrapper.get('[data-action="new-session"]').attributes('disabled')).toBeDefined()
+    finish([session])
+    await flushPromises()
+    expect(wrapper.text()).toContain('Saved answer')
+    expect(wrapper.get('[data-action="new-session"]').attributes('disabled')).toBeUndefined()
+    await wrapper.get('[data-action="new-session"]').trigger('click')
+    await flushPromises()
+    expect(wrapper.text()).not.toContain('Saved answer')
+    expect(wrapper.text()).toContain('离线正文')
+    expect(wrapper.get('[aria-label="问题输入框"]').attributes('disabled')).toBeUndefined()
+  })
+
+  it('restores the latest source-owned conversation from a direct route and its original snapshot', async () => {
+    const sessions = [
+      { id: 'old', pageId: page.id, snapshotId: 'snap-old', title: page.title, finalUrl: page.canonicalUrl, capturedAt: 1, byteLength: 80, createdAt: 1, updatedAt: 2, firstQuestion: '旧问题' },
+      { id: 'latest', pageId: page.id, snapshotId: 'snap-latest', title: page.title, finalUrl: page.canonicalUrl, capturedAt: 1, byteLength: 80, createdAt: 1, updatedAt: 20, firstQuestion: '最近问题' },
+      { id: 'foreign', pageId: 'other', snapshotId: 'foreign-snap', title: 'Other', finalUrl: page.canonicalUrl, capturedAt: 1, byteLength: 80, createdAt: 99, updatedAt: 99, firstQuestion: 'Other' },
+    ]
+    vi.mocked(window.db.webQa.listPages).mockResolvedValue([page])
+    vi.mocked(window.db.webQa.listSessions).mockResolvedValue(sessions)
+    vi.mocked(window.db.webQa.getSession).mockImplementation(async id => ({ ...sessions.find(session => session.id === id)!, messages: [
+      { id: 'answer', sessionId: id, role: 'assistant', content: id === 'latest' ? '最近回答' : '旧回答', status: 'completed', error: '', modelId: '', createdAt: 2 },
+    ] }))
+    vi.mocked(window.db.webQa.getPreview).mockImplementation(async id => ({ ...cached, id }))
+    const routeRouter = createRouter({ history: createMemoryHistory(), routes: [{ path: '/web-preview', component: WebPreviewView }] })
+    await routeRouter.push('/web-preview?page=page-1')
+    wrapper = mount(WebPreviewView, { global: { plugins: [routeRouter] } })
+    await flushPromises()
+    expect(wrapper.text()).toContain('最近回答')
+    expect(preview.showCached).toHaveBeenLastCalledWith('snap-latest', expect.any(Object))
+    expect(preview.open).not.toHaveBeenCalled()
+    await routeRouter.push('/web-preview?page=page-1&session=old')
+    await flushPromises()
+    expect(wrapper.text()).toContain('旧回答')
+    expect(preview.showCached).toHaveBeenLastCalledWith('snap-old', expect.any(Object))
+    await routeRouter.push('/web-preview?page=page-1&session=foreign')
+    await flushPromises()
+    expect(wrapper.text()).toContain('最近回答')
+    expect(preview.showCached).not.toHaveBeenCalledWith('foreign-snap', expect.any(Object))
+  })
+
+  it('restores a source with no conversations and reports a missing route source', async () => {
+    vi.mocked(window.db.webQa.listPages).mockResolvedValue([page])
+    const routeRouter = createRouter({ history: createMemoryHistory(), routes: [{ path: '/web-preview', component: WebPreviewView }] })
+    await routeRouter.push('/web-preview?page=page-1')
+    wrapper = mount(WebPreviewView, { global: { plugins: [routeRouter] } })
+    await flushPromises()
+    expect(wrapper.text()).toContain('离线正文')
+    expect(preview.showCached).toHaveBeenCalledWith('snap-1', expect.any(Object))
+    await routeRouter.push('/web-preview?page=deleted')
+    await flushPromises()
+    expect(wrapper.get('[role="alert"]').text()).toContain('不存在')
+    expect(wrapper.text()).not.toContain('离线正文')
+    vi.mocked(window.db.webQa.listPages).mockResolvedValue([{ ...page, id: 'deleted' }])
+    vi.mocked(window.db.webQa.getPreview).mockResolvedValue({ ...cached, pageId: 'deleted' })
+    await wrapper.get('[data-action="retry-history"]').trigger('click')
+    await flushPromises()
+    expect(wrapper.text()).toContain('离线正文')
+  })
+
+  it('rejects a session whose loaded source differs from its history summary', async () => {
+    const summary = { id: 'tampered', pageId: page.id, snapshotId: cached.id, title: page.title, finalUrl: page.canonicalUrl, capturedAt: 1, byteLength: 80, createdAt: 1, updatedAt: 2, firstQuestion: '?' }
+    vi.mocked(window.db.webQa.listPages).mockResolvedValue([page])
+    vi.mocked(window.db.webQa.listSessions).mockResolvedValue([summary])
+    vi.mocked(window.db.webQa.getSession).mockResolvedValue({ ...summary, pageId: 'other', messages: [{ id: 'other-a', sessionId: summary.id, role: 'assistant', content: 'Wrong source answer', status: 'completed', error: '', modelId: '', createdAt: 2 }] })
+    const routeRouter = createRouter({ history: createMemoryHistory(), routes: [{ path: '/web-preview', component: WebPreviewView }] })
+    await routeRouter.push('/web-preview?page=page-1')
+    wrapper = mount(WebPreviewView, { global: { plugins: [routeRouter] } })
+    await flushPromises()
+    expect(wrapper.get('[role="alert"]').text()).toContain('不属于')
+    expect(wrapper.text()).not.toContain('Wrong source answer')
+    expect(preview.showCached).not.toHaveBeenCalled()
+  })
+
+  it('keeps a user-opened webpage when an initial route history lookup finishes later', async () => {
+    vi.mocked(window.db.webQa.listPages).mockResolvedValue([page])
+    let finish!: (sessions: []) => void
+    vi.mocked(window.db.webQa.listSessions).mockReturnValueOnce(new Promise(resolve => { finish = resolve })).mockResolvedValue([])
+    const routeRouter = createRouter({ history: createMemoryHistory(), routes: [{ path: '/web-preview', component: WebPreviewView }] })
+    await routeRouter.push('/web-preview?page=page-1')
+    wrapper = mount(WebPreviewView, { global: { plugins: [routeRouter] } })
+    await flushPromises()
+    await wrapper.get('[aria-label="网页地址"]').setValue('https://example.org/new')
+    await wrapper.get('[aria-label="网页地址"]').trigger('keydown.enter')
+    await flushPromises()
+    finish([])
+    await flushPromises()
+    expect(wrapper.text()).toContain('在线网页预览')
+    expect(wrapper.text()).not.toContain('本地缓存阅读')
+  })
+
+  it('ignores an old direct-route restoration after the route source changes', async () => {
+    const secondPage = { ...page, id: 'page-2', latestSnapshotId: 'snap-2', title: 'Second' }
+    vi.mocked(window.db.webQa.listPages).mockResolvedValue([page, secondPage])
+    let finish!: (sessions: []) => void
+    vi.mocked(window.db.webQa.listSessions).mockImplementation(async id => id === page.id ? new Promise(resolve => { finish = resolve }) : [])
+    vi.mocked(window.db.webQa.getPreview).mockImplementation(async id => ({ ...cached, id, pageId: id === 'snap-2' ? 'page-2' : page.id, preview: { truncated: false, blocks: [{ kind: 'paragraph', text: id === 'snap-2' ? 'Second body' : 'Stale body' }] } }))
+    const routeRouter = createRouter({ history: createMemoryHistory(), routes: [{ path: '/web-preview', component: WebPreviewView }] })
+    await routeRouter.push('/web-preview?page=page-1')
+    wrapper = mount(WebPreviewView, { global: { plugins: [routeRouter] } })
+    await flushPromises()
+    await routeRouter.push('/web-preview?page=page-2')
+    await flushPromises()
+    finish([])
+    await flushPromises()
+    expect(wrapper.text()).toContain('Second body')
+    expect(wrapper.text()).not.toContain('Stale body')
+  })
+
   it('switches right-side question and summary tabs while preserving the webpage and question draft', async () => {
     vi.mocked(window.db.webQa.listPages).mockResolvedValue([page])
     vi.mocked(preview.showCached).mockResolvedValue(true)

@@ -113,14 +113,15 @@ export function useWebPageHistory(preview: PreviewApi, repository: WebRepository
     return version === selectionVersion
   }
 
-  async function selectSession(id: string, bounds: PreviewBounds): Promise<boolean> {
+  async function selectSession(id: string, bounds: PreviewBounds, expectedPageId?: string): Promise<boolean> {
     const version = ++selectionVersion
-    await qa.load(id)
+    await qa.load(id, expectedPageId)
     if (version !== selectionVersion) return false
     const session = qa.currentSession.value
     if (!session) throw new Error('网页会话不存在')
     const cached = await repository.getPreview(session.snapshotId)
     if (!cached) throw new Error('网页缓存不存在')
+    if (cached.pageId !== session.pageId) throw new Error('网页缓存与会话来源不一致')
     const page = pages.value.find(p => p.id === session.pageId) ?? selectedPage.value
     const appearance = !cached.hasOriginalAppearance
       ? await repository.findAppearance(session.pageId, cached.contentHash) : null
@@ -155,6 +156,18 @@ export function useWebPageHistory(preview: PreviewApi, repository: WebRepository
     await refreshPages()
   }
 
+  function clearSelection() {
+    ++selectionVersion
+    qa.selectSnapshot('', '')
+    selectedPage.value = null
+    selectedSnapshotPreview.value = null
+    nativeCached.value = false
+    cacheLoadError.value = ''
+    appearanceNotice.value = ''
+    mode.value = 'cached'
+    void preview.setBounds(zeroBounds).catch(() => {})
+  }
+
   return { pages, selectedPage, selectedSnapshotPreview, sessions: qa.sessions, mode, nativeCached, cacheLoadError, appearanceNotice,
-    refreshPages, openExplicit, openLive, saveCurrent, selectPage, selectSession, refreshPage, removePage }
+    refreshPages, openExplicit, openLive, saveCurrent, selectPage, selectSession, refreshPage, removePage, clearSelection }
 }

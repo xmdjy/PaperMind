@@ -82,11 +82,12 @@ export function createWebQaController(deps: WebQaDependencies) {
     if (version === selectionVersion) sessions.value = rows
   }
 
-  async function load(id: string) {
+  async function load(id: string, expectedPageId?: string) {
     detachRun()
     const version = ++selectionVersion
     let detail = await deps.repository.getSession(id)
     if (version !== selectionVersion) return
+    if (detail && expectedPageId && detail.pageId !== expectedPageId) throw new Error('此会话不属于当前网页')
     if (detail) {
       for (const message of detail.messages.filter(m => m.role === 'assistant' && m.status === 'streaming')) {
         await deps.repository.updateMessage(message.id, { status: 'interrupted', error: '上次生成未完成，请重试。' })
@@ -98,6 +99,7 @@ export function createWebQaController(deps: WebQaDependencies) {
         detail = await deps.repository.getSession(id)
       }
       if (version !== selectionVersion) return
+      if (detail && expectedPageId && detail.pageId !== expectedPageId) throw new Error('此会话不属于当前网页')
       if (detail) {
         selectedPageId.value = detail.pageId
         selectedSnapshotId.value = detail.snapshotId
