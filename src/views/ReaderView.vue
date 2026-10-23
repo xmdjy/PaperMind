@@ -63,6 +63,7 @@
           <button type="button" class="right-tab" :class="{ active: rightTab === 'notes' }" :aria-pressed="rightTab === 'notes'" @click="rightTab = 'notes'"><el-icon aria-hidden="true"><EditPen /></el-icon> 阅读笔记</button>
         </div>
         <template v-if="rightTab === 'chat'">
+          <p v-if="conversationNotice" class="conversation-notice" role="status">{{ conversationNotice }}</p>
           <div class="chat-header">
             <el-select v-model="activeConvId" size="small" placeholder="选择对话" aria-label="当前论文对话" class="conversation-select">
               <el-option v-for="c in paperConversations" :key="c.id" :label="c.title" :value="c.id" />
@@ -94,6 +95,7 @@ import NotesPanel from '../components/NotesPanel.vue'
 import { usePaperStore, type Paper } from '../stores/paper'
 import { useChatStore } from '../stores/chat'
 import { sourceFromRouteQuery, sourceRouteQuery, type SourceRef } from '../utils/sourceRef'
+import { latestPaperConversation } from '../utils/readingMap'
 
 const route = useRoute()
 const router = useRouter()
@@ -182,6 +184,17 @@ const paperConversations = computed(() =>
   chatStore.conversations.filter(c => c.paperIds.includes(paper.value?.id ?? '')),
 )
 const activeConv = computed(() => chatStore.conversations.find(c => c.id === activeConvId.value) ?? null)
+const conversationNotice = computed(() => typeof route.query.conversation === 'string'
+  && !paperConversations.value.some(conversation => conversation.id === route.query.conversation)
+  ? '此会话已不存在或不属于当前论文，已回到当前论文的可用对话。' : '')
+function routeConversationId() {
+  return typeof route.query.conversation === 'string'
+    ? latestPaperConversation(chatStore.conversations, paper.value?.id ?? '', route.query.conversation)?.id
+    : paperConversations.value[0]?.id
+}
+watch(() => route.query.conversation, () => {
+  if (paper.value && chatStore.loaded) activeConvId.value = routeConversationId() ?? activeConvId.value
+})
 
 function updateStatus(status: Paper['status']) {
   if (paper.value) paperStore.updatePaper(paper.value.id, { status })
@@ -258,7 +271,7 @@ watch([() => paper.value?.id, () => chatStore.loaded], async ([id, chatReady], _
     }
     if (paper.value?.status === 'unread') await paperStore.updatePaper(id, { status: 'reading' })
     if (cancelled) return
-    if (paperConversations.value.length) activeConvId.value = paperConversations.value[0].id
+    if (paperConversations.value.length) activeConvId.value = routeConversationId() ?? ''
     else await createConv()
   } catch {
     if (!cancelled) fileError.value = '论文未能打开，请返回文献库后重试。'
@@ -281,6 +294,7 @@ onBeforeUnmount(() => {
 </script>
 
 <style scoped>
+.conversation-notice { padding: 10px 20px; font-size: 11px; line-height: 1.6; color: var(--text-muted); }
 .reader-view { display: flex; flex-direction: column; height: 100%; overflow: hidden; }
 .reader-topbar { display: flex; align-items: center; gap: 22px; padding: 18px 24px; border-bottom: 1px solid var(--border); flex-shrink: 0; background: var(--bg-base); min-height: 82px; }
 .back-button { font-size: 12px; color: var(--text-secondary); padding-left: 0; flex-shrink: 0; }

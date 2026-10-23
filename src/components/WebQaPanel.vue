@@ -2,13 +2,13 @@
   <section class="web-qa-panel" aria-label="网页问答">
     <header class="qa-header">
       <div class="conversation-picker">
-        <select id="web-qa-history" aria-label="当前网页对话" :value="session?.id || ''" @change="onHistoryChange">
+        <select id="web-qa-history" aria-label="当前网页对话" :value="session?.id || ''" :disabled="restoringHistory" @change="onHistoryChange">
           <option value="">新对话</option>
           <option v-for="(item, index) in sessions" :key="item.id" :value="item.id" :title="`${formatTime(item.createdAt)} · ${item.title || item.finalUrl}`">{{ 'firstQuestion' in item && item.firstQuestion ? item.firstQuestion : `对话 ${index + 1}` }}</option>
         </select>
         <ArrowDown aria-hidden="true" />
       </div>
-      <button type="button" class="new-button" data-action="new-session" aria-label="新建网页问答" title="新建问答" @click="emit('new')"><Plus aria-hidden="true" /></button>
+      <button type="button" class="new-button" data-action="new-session" aria-label="新建网页问答" title="新建问答" :disabled="restoringHistory" @click="emit('new')"><Plus aria-hidden="true" /></button>
     </header>
 
     <details class="page-details">
@@ -104,6 +104,7 @@ const props = defineProps<{
   pages?: WebPageSummary[]
   selectedPageId?: string
   busy: boolean
+  restoringHistory?: boolean
   error: string
   streamedText: string
   canAsk: boolean

@@ -49,7 +49,8 @@
 
     <div v-if="previewState.loading" class="loading-line" role="progressbar" aria-label="正在加载网页" />
     <p v-if="previewState.notice" class="toolbar-notice" role="status">{{ previewState.notice }}</p>
-    <p v-if="inputError && previewState.visible" class="toolbar-notice" role="alert">{{ inputError }}</p>
+    <p v-if="inputError && (previewState.visible || history.selectedSnapshotPreview.value)" class="toolbar-notice" role="alert">{{ inputError }}</p>
+    <p v-if="restoringHistory" class="toolbar-notice" role="status">正在读取本地阅读历史…</p>
     <div class="web-mode-switch" role="group" aria-label="网页问答视图">
       <button type="button" aria-label="显示网页面板" :class="{ active: mobilePane === 'web' }" @click="setMobilePane('web')">网页</button>
       <button type="button" aria-label="显示问答面板" :class="{ active: mobilePane === 'qa' }" @click="setMobilePane('qa')">问答</button>
@@ -58,7 +59,12 @@
       <main id="web-document" class="web-split-left" :class="{ 'mobile-active': mobilePane === 'web' }" :style="{ flexBasis: splitRatio + '%' }" aria-label="网页内容">
         <div class="preview-stage">
           <div ref="previewSlot" class="preview-slot" @dragover.prevent @drop.prevent="onDrop">
-            <WebCachedPreview v-if="history.mode.value === 'cached' && !history.nativeCached.value && history.selectedSnapshotPreview.value" :snapshot="history.selectedSnapshotPreview.value" :load-error="history.cacheLoadError.value" @open-source="openSavedSource" />
+            <div v-if="routeRestoreError" class="preview-message has-error">
+              <h1 class="message-title font-display">阅读历史未能打开</h1>
+              <p role="alert">{{ routeRestoreError }}</p>
+              <div class="message-actions"><button type="button" data-action="retry-history" class="primary-action" @click="restoreRoute">重新读取本地历史</button></div>
+            </div>
+            <WebCachedPreview v-else-if="history.mode.value === 'cached' && !history.nativeCached.value && history.selectedSnapshotPreview.value" :snapshot="history.selectedSnapshotPreview.value" :load-error="history.cacheLoadError.value" @open-source="openSavedSource" />
             <div v-else-if="!previewState.visible" class="preview-message" :class="{ 'has-error': previewState.error || inputError }">
               <template v-if="previewState.error || inputError">
                 <h1 class="message-title font-display">网页未能打开</h1>
@@ -87,7 +93,7 @@
         </div>
         <div v-show="rightTab === 'chat'" class="right-pane-content">
           <WebQaPanel ref="qaPanel" :session="qa.currentSession.value" :sessions="qa.sessions.value"
-            :pages="history.pages.value" :selected-page-id="history.selectedPage.value?.id || ''" :busy="qa.busy.value"
+            :pages="history.pages.value" :selected-page-id="history.selectedPage.value?.id || ''" :busy="qa.busy.value" :restoring-history="restoringHistory"
             :error="qa.error.value" :streamed-text="qa.streamedText.value" :can-ask="canAsk"
             :source-changed="sourceChanged" :model-name="chatStore.chatProfile.name"
             :profiles="chatStore.profiles" :profile-id="chatStore.chatProfile.id"
@@ -106,7 +112,9 @@
 </template>
 
 <script setup lang="ts">
-import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
+import { computed, inject, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
+import { routeLocationKey } from 'vue-router'
+import { latestWebSession } from '../utils/readingMap'
 import { ArrowLeft, ArrowRight, ChatLineRound, Document, Refresh, TopRight } from '@element-plus/icons-vue'
 import { isAllowedExternalUrl, normalizePreviewUrl } from '../utils/webPreviewUrl'
 import type { PreviewBounds, PreviewState } from '../types/webPreview'
@@ -120,6 +128,12 @@ import { useWebSummary } from '../composables/useWebSummary'
 import { ElMessageBox } from 'element-plus'
 
 const window = globalThis.window
+const route = inject(routeLocationKey, null)
+let routeVersion = 0
+let mounted = false
+let routeSource = ''
+const restoringHistory = ref(false)
+const routeRestoreError = ref('')
 const chatStore = useChatStore()
 const qa = useWebQa()
 const history = useWebPageHistory(window.preview, window.db.webQa, qa, snapshotId => {
@@ -211,10 +225,13 @@ async function sendQuestion(question: string) {
   await Promise.allSettled([qa.refresh(), history.refreshPages()])
 }
 function startNewSession() {
+  if (restoringHistory.value) return
+  cancelRouteRestore()
   qa.newSession()
   sourceChanged.value = liveDirty.value
 }
 async function loadSession(id: string) {
+  cancelRouteRestore()
   try {
     if (!await history.selectSession(id, measuredBounds())) return
     liveDirty.value = false
@@ -234,6 +251,7 @@ function runAction(action: () => Promise<void>) {
 }
 
 async function openUrl(url: string) {
+  cancelRouteRestore()
   inputError.value = ''
   try {
     liveDirty.value = true
@@ -244,6 +262,7 @@ async function openUrl(url: string) {
 }
 
 async function openAddress() {
+  cancelRouteRestore()
   try {
     const url = normalizePreviewUrl(address.value)
     address.value = url
@@ -267,6 +286,7 @@ async function onDrop(event: DragEvent) {
 }
 
 async function selectPage(id: string) {
+  cancelRouteRestore()
   try {
     if (!await history.selectPage(id, measuredBounds())) return
     liveDirty.value = false
@@ -277,6 +297,7 @@ async function selectPage(id: string) {
 }
 
 async function saveCurrent() {
+  cancelRouteRestore()
   try {
     await history.saveCurrent()
     liveDirty.value = false
@@ -285,6 +306,7 @@ async function saveCurrent() {
 }
 
 async function updateCache() {
+  cancelRouteRestore()
   try {
     await history.refreshPage(measuredBounds())
     liveDirty.value = false
@@ -296,6 +318,7 @@ async function removePage(id: string) {
   try {
     await ElMessageBox.confirm('将删除此网页的全部缓存版本及其问答会话。确认删除？', '删除网页历史', { type: 'warning' })
   } catch { return }
+  cancelRouteRestore()
   try {
     webSummary.cancelPage(id)
     await history.removePage(id)
@@ -324,7 +347,8 @@ function openExternal() {
 }
 
 onMounted(async () => {
-  void history.refreshPages()
+  mounted = true
+  void restoreRoute()
   unsubscribe = window.preview.onState(next => {
     if (history.mode.value === 'live' && history.selectedPage.value
       && (next.url !== history.selectedPage.value.canonicalUrl
@@ -346,6 +370,9 @@ onMounted(async () => {
 })
 
 onBeforeUnmount(() => {
+  mounted = false
+  routeVersion++
+  history.clearSelection()
   qa.stop()
   stopResize()
   observer?.disconnect()
@@ -354,6 +381,55 @@ onBeforeUnmount(() => {
   window.removeEventListener('mouseup', stopResize)
   unsubscribe?.()
   void window.preview.close()
+})
+
+// Route restoration reads only saved history. The source is validated before loading a session.
+function cancelRouteRestore() {
+  routeVersion++
+  restoringHistory.value = false
+  routeRestoreError.value = ''
+}
+
+async function restoreRoute() {
+  const version = ++routeVersion
+  const pageId = typeof route?.query.page === 'string' ? route.query.page : ''
+  const sessionId = typeof route?.query.session === 'string' ? route.query.session : undefined
+  if (pageId || routeSource) history.clearSelection()
+  routeSource = pageId
+  restoringHistory.value = !!pageId
+  routeRestoreError.value = ''
+  inputError.value = ''
+  try {
+    await history.refreshPages()
+    await nextTick()
+    if (!mounted || version !== routeVersion || !pageId) return
+    const page = history.pages.value.find(item => item.id === pageId)
+    if (!page) throw new Error('此网页历史已不存在，请返回阅读星图刷新资料。')
+    const sessions = await window.db.webQa.listSessions(pageId)
+    if (!mounted || version !== routeVersion) return
+    const session = latestWebSession(sessions, pageId, sessionId)
+    const selected = session ? await history.selectSession(session.id, measuredBounds(), pageId)
+      : await history.selectPage(pageId, measuredBounds())
+    if (!mounted || version !== routeVersion || !selected) return
+    liveDirty.value = false
+    sourceChanged.value = false
+    address.value = page.canonicalUrl
+    if (sessionId && !sessions.some(item => item.id === sessionId && item.pageId === pageId)) {
+      inputError.value = '指定会话已不存在或不属于此网页，已打开当前网页可用的阅读历史。'
+    }
+    await nextTick(syncBounds)
+  } catch (cause) {
+    if (mounted && version === routeVersion && !superseded(cause)) {
+      const message = cause instanceof Error ? cause.message : '网页历史加载失败，请重试。'
+      if (pageId) routeRestoreError.value = message
+      else inputError.value = message
+    }
+  } finally {
+    if (mounted && version === routeVersion) restoringHistory.value = false
+  }
+}
+watch(() => [route?.query.page, route?.query.session], () => {
+  if (mounted) void restoreRoute()
 })
 
 watch(splitRatio, () => { void nextTick(syncBounds) })
