@@ -93,6 +93,24 @@ describe('HTML summary parser', () => {
     expect(document.warnings).toEqual([])
   })
 
+  it.each(['chrome--', '----MultipartBoundary--saved----'])('loads archived images when the MIME boundary itself ends in hyphens (%s)', async boundary => {
+    const mime = [
+      'MIME-Version: 1.0', `Content-Type: multipart/related; boundary="${boundary}"`, '',
+      `--${boundary}`, 'Content-Type: text/html', '', '<p>Saved page</p>',
+      `--${boundary}`, 'Content-Type: image/png', 'Content-Transfer-Encoding: base64',
+      'Content-Location: images/first.png', '', png,
+      `--${boundary}`, 'Content-Type: image/png', 'Content-Transfer-Encoding: base64',
+      'Content-ID: <second@saved>', '', png,
+      `--${boundary}--`, '',
+    ].join('\r\n')
+    const document = await parseHtmlSummary(snapshot('<main><img src="images/first.png"><img src="cid:second@saved"></main>', mime))
+    const pictures = document.items.filter(item => item.kind === 'picture')
+    expect(pictures).toHaveLength(2)
+    expect(pictures.map(item => item.images.length)).toEqual([1, 1])
+    expect(pictures.every(item => item.images[0]?.data?.startsWith('data:image/png;base64,'))).toBe(true)
+    expect(document.warnings).toEqual([])
+  })
+
   it('decodes quoted-printable archived SVG and converts it to a supported raster image', async () => {
     const svg = '<svg xmlns="http://www.w3.org/2000/svg" width="2" height="2"><rect width="2" height="2" fill="red"/></svg>'
     const mime = archive([`Content-Type: image/svg+xml\r\nContent-Transfer-Encoding: quoted-printable\r\nContent-Location: images/vector.svg\r\n\r\n${svg.replace(/=/g, '=3D').replace('<rect', '=\r\n<rect')}`])

@@ -2,6 +2,132 @@ import { describe, expect, it } from 'vitest'
 import { renderMarkdown } from '../utils/markdown'
 
 describe('renderMarkdown', () => {
+  const view = (content: string) => {
+    const root = document.createElement('div')
+    root.innerHTML = renderMarkdown(content)
+    return root
+  }
+
+  it.each([
+    ['**MCE（2026）**进一步说明', 'MCE（2026）'],
+    ['采用**“上下文工程”**方法', '“上下文工程”'],
+    ['采用**(context)**方法', '(context)'],
+    ['采用__“上下文工程”__方法', '“上下文工程”'],
+    ['**MCE（含 `code` 与 $x$）**进一步说明', 'MCE（含 code 与 x）'],
+    ['**$x$**表示变量', 'x'],
+    ['**`code`**表示代码', 'code'],
+    ['**L∞**范数', 'L∞'],
+  ])('renders emphasis next to Chinese punctuation: %s', (source, label) => {
+    const root = view(source)
+    const strong = root.querySelector('strong')
+    expect(strong).not.toBeNull()
+    for (const math of Array.from(strong!.querySelectorAll('.katex'))) math.replaceWith('x')
+    expect(strong?.textContent).toBe(label)
+    expect(root.textContent).not.toContain('**')
+  })
+
+  it('keeps literal emphasis, code, URLs and unfinished delimiters unchanged', () => {
+    const root = view('`**（literal）**中文` \\*\\*转义\\*\\* **未结束\n\n```md\n**（代码）**中文\n```\n\n[x](https://example.com/a**b)')
+    expect(root.querySelectorAll('strong')).toHaveLength(0)
+    expect(root.querySelector('code')?.textContent).toBe('**（literal）**中文')
+    expect(root.querySelector('pre code')?.textContent).toBe('**（代码）**中文\n')
+    expect(root.querySelector('a')?.getAttribute('href')).toBe('https://example.com/a**b')
+  })
+
+  it.each([
+    ['`\\(literal\\)`', '\\(literal\\)'],
+    ['```tex\n\\[code\\]\n```', '\\[code\\]\n'],
+    ['~~~tex\n\\(code\\)\n~~~', '\\(code\\)\n'],
+    ['    \\[code\\]', '\\[code\\]\n'],
+  ])('preserves literal math in code: %s', (source, expected) => {
+    const root = view(source)
+    expect(root.querySelector('code')?.textContent).toBe(expected)
+    expect(root.querySelector('.katex')).toBeNull()
+  })
+
+  it('preserves escaped math delimiters and link destinations', () => {
+    const root = view('\\\\(literal\\\\) \\\\[literal\\\\]\n\n[literal](https://example.com/\\(x\\))')
+    expect(root.querySelector('.katex')).toBeNull()
+    expect(root.querySelector('p')?.textContent).toBe('\\(literal\\) \\[literal\\]')
+    expect(root.querySelector('a')?.getAttribute('href')).toBe('https://example.com/(x)')
+  })
+
+  it('renders bracket math adjacent to digits without changing delimiters to currency', () => {
+    const root = view('2\\(x\\) and \\(x\\)2')
+    expect(root.querySelectorAll('.katex')).toHaveLength(2)
+    expect(Array.from(root.querySelectorAll('.katex-html')).map(node => node.textContent)).toEqual(['x', 'x'])
+  })
+
+  it('keeps display math and continuation inside their list item', () => {
+    const root = view('- before\n\n  \\[x^2\\]\n\n  after\n- next')
+    expect(root.querySelectorAll(':scope > ul')).toHaveLength(1)
+    expect(root.querySelectorAll('li')).toHaveLength(2)
+    expect(root.querySelector('li .katex-display')).not.toBeNull()
+    expect(root.querySelector('li')?.textContent).toContain('after')
+  })
+
+  it('renders multiline quoted display math without quote markers in the formula', () => {
+    const root = view('> before\n>\n> \\[\n> x^2\n> \\]\n>\n> after')
+    expect(root.querySelectorAll(':scope > blockquote')).toHaveLength(1)
+    expect(root.querySelector('blockquote .katex-display')).not.toBeNull()
+    expect(root.querySelector('.katex-html')?.textContent).not.toContain('>')
+    expect(root.querySelector('blockquote')?.textContent).toContain('after')
+  })
+
+  it('renders bracket display math within a table cell without adding rows', () => {
+    const root = view('| A | B |\n| - | - |\n| \\[x^2\\] | x |')
+    expect(root.querySelectorAll('tbody tr')).toHaveLength(1)
+    expect(root.querySelectorAll('td')).toHaveLength(2)
+    expect(root.querySelector('td .katex-display')).not.toBeNull()
+    expect(root.querySelector('.katex-error')).toBeNull()
+  })
+
+  it('does not move unrelated punctuation just because a report has paper evidence', () => {
+    const root = view(`![original](asset:${'a'.repeat(64)})\n\n*原文图片* [p2](paper-source:p:1)\n\nEarlier.\n\n:literal leading colon`)
+    expect(root.querySelector('p:last-child')?.textContent).toBe(':literal leading colon')
+  })
+
+  it('preserves leading punctuation after evidence when there is no preceding claim', () => {
+    const root = view(`![original](asset:${'a'.repeat(64)})\n\n*原文图片* [p2](paper-source:p:1)\n\n；独立说明。`)
+    expect(root.querySelector('p')?.textContent).toBe('；独立说明。')
+  })
+
+  it('does not wrap an entire list as a sourced formula', () => {
+    const root = view('- $$x$$\n- plain\n\n[p1](paper-source:p:0)')
+    expect(root.querySelector('figure ul')).toBeNull()
+    expect(root.querySelectorAll('li')).toHaveLength(2)
+    expect(root.querySelector('li:last-child')?.textContent).toBe('plain')
+  })
+
+  it.each(['\\[x\\] 后续说明', '$$x$$ 后续说明', '\\[\nx\n\\] 后续说明'])('keeps prose after display math: %s', source => {
+    const root = view(source)
+    expect(root.querySelector('.katex-display')).not.toBeNull()
+    expect(root.textContent).toContain('后续说明')
+  })
+
+  it.each([
+    String.raw`\[\begin{matrix}x\\] + y\end{matrix}\]`,
+    String.raw`$$x \$\$$$`,
+  ])('does not mistake escaped formula characters for closing delimiters: %s', source => {
+    const root = view(source)
+    expect(root.querySelectorAll('.katex-display')).toHaveLength(1)
+    expect(root.querySelector('.katex-error')).toBeNull()
+    root.querySelector('.katex')?.remove()
+    expect(root.textContent?.trim()).toBe('')
+  })
+
+  it('keeps the report readable if a formula exceeds the math renderer stack', () => {
+    const root = view(`$$${'{'.repeat(2500)}x${'}'.repeat(2500)}$$\n\n后续正文`)
+    expect(root.querySelector('.katex-error')).not.toBeNull()
+    expect(root.textContent).toContain('后续正文')
+  })
+
+  it('preserves readable original-image descriptions and titles', () => {
+    const root = view(`![A [B] \\[C\\] **bold** \`code\`](asset:${'a'.repeat(64)} "Figure > 1")`)
+    expect(root.querySelector('img')?.alt).toBe('A [B] [C] bold code')
+    expect(root.querySelector('img')?.title).toBe('Figure > 1')
+  })
+
   it('groups old report images with their short source label and repairs detached punctuation', () => {
     const id = 'a'.repeat(64)
     const html = renderMarkdown(`结果提高 [p2](paper-source:paper:1)。\n\n![原文图片](asset:${id})\n\n*原文图片* [p2](paper-source:paper:1)\n\n；后续实验也支持这一点。`)

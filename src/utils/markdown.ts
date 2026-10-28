@@ -1,22 +1,15 @@
 import DOMPurify from 'dompurify'
 import 'katex/dist/katex.min.css'
 import MarkdownIt from 'markdown-it'
-import texmath from 'markdown-it-texmath'
+import type Token from 'markdown-it/lib/token.mjs'
+import { createMarkdownParser } from './markdownParser'
 import { parseEvidenceHref } from './sourceRef'
 
-const markdown = new MarkdownIt({
-  html: false,
-  breaks: true,
-  linkify: true,
-})
-
-markdown.use(texmath, {
-  delimiters: 'dollars',
-  katexOptions: {
-    throwOnError: false,
-    strict: false,
-  },
-})
+const markdown = createMarkdownParser()
+const imageLabels = new MarkdownIt({ html: false })
+const labelText = (tokens: Token[]): string => tokens.map(token => token.children ? labelText(token.children)
+  : token.type === 'softbreak' || token.type === 'hardbreak' ? ' '
+    : token.nesting === 0 ? token.content : '').join('')
 
 const defaultImage = markdown.renderer.rules.image
 markdown.renderer.rules.image = (tokens, index, options, env, self) => {
@@ -25,7 +18,9 @@ markdown.renderer.rules.image = (tokens, index, options, env, self) => {
   if (source.startsWith('asset:')) {
     const id = source.slice(6)
     if (!/^[a-f0-9]{64}$/.test(id)) return ''
-    return `<img data-asset-id="${id}" alt="${markdown.utils.escapeHtml(token.content)}" loading="lazy">`
+    const label = labelText(imageLabels.parseInline(token.content, {}))
+    const title = token.attrGet('title')
+    return `<img data-asset-id="${id}" alt="${markdown.utils.escapeHtml(label)}"${title === null ? '' : ` title="${markdown.utils.escapeHtml(title)}"`} loading="lazy">`
   }
   return defaultImage ? defaultImage(tokens, index, options, env, self) : self.renderToken(tokens, index, options)
 }
@@ -103,6 +98,11 @@ function formatEvidence(html: string): string {
   for (const formula of Array.from(root.querySelectorAll('.katex-display'))) {
     let block: Element = formula
     while (block.parentElement && block.parentElement !== root) block = block.parentElement
+    // Only a standalone equation can own the following source caption.
+    if (!block.matches('section, p') || block.querySelectorAll('.katex-display').length !== 1) continue
+    const rest = block.cloneNode(true) as Element
+    rest.querySelector('.katex-display')?.remove()
+    if (rest.textContent?.trim() || rest.querySelector('img')) continue
     const source = block.nextElementSibling
     if (!sourceParagraph(source)) continue
     makeFigure(block, block, '原文公式', source, 'formula')
@@ -112,11 +112,16 @@ function formatEvidence(html: string): string {
     if (first?.nodeType !== Node.TEXT_NODE) continue
     const opening = /^\s*([；;，,。.!?！？：:])\s*/.exec(first.textContent || '')
     if (!opening) continue
-    first.textContent = (first.textContent || '').slice(opening[0].length)
     let before = paragraph.previousElementSibling
-    while (before?.matches('figure.paper-evidence') || sourceParagraph(before)) before = before.previousElementSibling
+    let followsEvidence = false
+    while (before?.matches('figure.paper-evidence') || sourceParagraph(before)) {
+      followsEvidence = true
+      before = before.previousElementSibling
+    }
     const ending = before?.textContent?.trim() || ''
-    if (before?.tagName === 'P' && ending && !/^[–-]$/.test(ending) && !/[；;，,。.!?！？：:]$/.test(ending)) before.append(opening[1])
+    if (!followsEvidence || before?.tagName !== 'P' || !ending || /^[–-]$/.test(ending)) continue
+    first.textContent = (first.textContent || '').slice(opening[0].length)
+    if (!/[；;，,。.!?！？：:]$/.test(ending)) before.append(opening[1])
     if (!paragraph.textContent?.trim()) paragraph.remove()
   }
   for (const paragraph of Array.from(root.querySelectorAll(':scope > p'))) {
@@ -147,17 +152,7 @@ function formatEvidence(html: string): string {
 }
 
 export function renderMarkdown(content: string): string {
-  // Some models emit LaTeX delimiters as \(...\) and \[...\]. Markdown
-  // treats their backslashes as escapes, so normalize them to dollar syntax.
-  const normalized = content
-    .replace(/\\\[\s*([\s\S]*?)\s*\\\]/g, (_match, formula: string) =>
-      `\n$$\n${formula.trim()}\n$$\n`,
-    )
-    .replace(/\\\(\s*([^\n]*?)\s*\\\)/g, (_match, formula: string) =>
-      `$${formula.trim()}$`,
-    )
-
-  const html = DOMPurify.sanitize(markdown.render(normalized), {
+  const html = DOMPurify.sanitize(markdown.render(content), {
     USE_PROFILES: { html: true, mathMl: true },
     ADD_ATTR: ['target'],
   })

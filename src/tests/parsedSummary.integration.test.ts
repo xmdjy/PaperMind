@@ -56,7 +56,7 @@ it.each(['paper', 'web'] as const)('parses %s, generates once, persists source-o
     expect(parts[0].text).toContain('93.2%')
     expect(parts.filter((part: any) => part.type === 'image_url')).toHaveLength(1)
     const assetId = repository.exportBackup().assets[0].id
-    return new Response(JSON.stringify({ choices: [{ message: { content: `结论为 93.2%。\n\n![原图](asset:${assetId})` }, finish_reason: 'stop' }] }), { headers: { 'Content-Type': 'application/json' } })
+    return new Response(JSON.stringify({ choices: [{ message: { content: `结论为 93.2%。\n\n> \\[x^2\\]\n\n\`\\(literal\\)\`\n\n![原图](asset:${assetId})` }, finish_reason: 'stop' }] }), { headers: { 'Content-Type': 'application/json' } })
   }))
   try {
     setActivePinia(createPinia())
@@ -64,6 +64,8 @@ it.each(['paper', 'web'] as const)('parses %s, generates once, persists source-o
     const result = await useVisualSummaryStore().generate(input, profile)
     expect(result.content).toContain('93.2%')
     expect(result.content).toContain('asset:')
+    expect(result.content).toContain('> \\[x^2\\]')
+    expect(result.content).toContain('`\\(literal\\)`')
     const backup = repository.exportBackup()
     expect(backup.assets[0]).toMatchObject({ kind, sourceId: 'source', data: png })
     expect(repository.get(kind, 'source', 'materials')!.payload).not.toContain('data:image')

@@ -1,0 +1,24 @@
+.markdown-body { min-width: 0; overflow-wrap: anywhere; }
+.markdown-body p { margin: 0 0 .75em; }
+.markdown-body > :last-child { margin-bottom: 0; }
+.markdown-body :is(h1, h2, h3, h4, h5, h6) { margin: 1em 0 .5em; color: var(--text-primary); line-height: 1.35; }
+.markdown-body > :is(h1, h2, h3):first-child { margin-top: 0; }
+.markdown-body h1 { font-size: 1.6em; }
+.markdown-body h2 { font-size: 1.35em; }
+.markdown-body h3 { font-size: 1.15em; }
+.markdown-body :is(ul, ol) { margin: .5em 0 .75em; padding-left: 1.5em; }
+.markdown-body li + li { margin-top: .25em; }
+.markdown-body li > p { margin-bottom: .35em; }
+.markdown-body blockquote { margin: .75em 0; padding: .25em 0 .25em .9em; color: var(--text-secondary); border-left: 3px solid var(--accent); }
+.markdown-body code { background: var(--bg-elevated); padding: 1px 5px; border-radius: 4px; font-size: .92em; }
+.markdown-body pre { margin: .75em 0; padding: 12px 14px; overflow-x: auto; background: var(--bg-elevated); border: 1px solid var(--border); border-radius: 7px; line-height: 1.5; }
+.markdown-body pre code { padding: 0; background: transparent; white-space: pre; overflow-wrap: normal; }
+.markdown-body .katex-display { margin: .85em 0; padding: .2em 0; overflow-x: auto; overflow-y: hidden; }
+.markdown-body .equation-number { display: block; text-align: right; }
+.markdown-body table { display: block; width: max-content; max-width: 100%; margin: .75em 0; overflow-x: auto; border-collapse: collapse; }
+.markdown-body :is(th, td) { padding: 6px 9px; border: 1px solid var(--border); text-align: left; }
+.markdown-body th { background: var(--bg-elevated); }
+.markdown-body a { color: var(--accent); text-decoration: none; overflow-wrap: anywhere; }
+.markdown-body a:hover { text-decoration: underline; }
+.markdown-body hr { margin: 1em 0; border: 0; border-top: 1px solid var(--border); }
+.markdown-body img { max-width: 100%; height: auto; }

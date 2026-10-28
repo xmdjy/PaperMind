@@ -1,6 +1,6 @@
 <template>
   <div :class="{ 'paper-report': hasPaperEvidence }">
-    <div ref="root" v-html="html" @click="activate" @keydown="onKeydown" />
+    <div ref="root" class="markdown-body" v-html="html" @click="activate" @keydown="onKeydown" />
     <el-dialog v-model="previewVisible" title="原文图片" width="min(1000px, 94vw)" append-to-body>
       <img class="asset-preview" :src="previewSource" :alt="previewAlt" />
     </el-dialog>
@@ -11,6 +11,7 @@
 import { computed, nextTick, onBeforeUnmount, ref, watch } from 'vue'
 import { ElDialog } from 'element-plus'
 import { renderMarkdown } from '../utils/markdown'
+import '../styles/markdown.css'
 import { IMAGE_DATA_PATTERN, MAX_IMAGE_BYTES } from '../utils/doclingDocument'
 import type { SourceRef } from '../utils/sourceRef'
 import { validEvidenceRegion } from '../utils/sourceRef'

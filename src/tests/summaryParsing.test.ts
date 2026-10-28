@@ -1,5 +1,7 @@
 import { describe, expect, it, vi } from 'vitest'
+import { createHash } from 'node:crypto'
 import { createSummaryParser } from '../../electron/summaryParsing'
+import { parseHtmlSummary } from '../../electron/htmlSummary'
 import type { ParsedDocument } from '../utils/doclingDocument'
 
 const document = (): ParsedDocument => ({ version: 1, warnings: [], items: [
@@ -55,6 +57,33 @@ describe('summary parsing boundary', () => {
     f.getSettings.mockReturnValue({ formula: false })
     await f.parser.parse('paper', 'p')
     expect(f.convertPdf).toHaveBeenCalledTimes(2)
+  })
+  it('rebuilds webpage materials cached before Chrome archive images were supported', async () => {
+    const f = fixture()
+    const oldParserKey = createHash('sha256').update(JSON.stringify({ protocol: 'parsed-materials-v1', kind: 'web' })).digest('hex')
+    f.records.set('web:snapshot:materials', {
+      sourceHash: 'snapshot:html-hash:1',
+      payload: JSON.stringify({ protocol: 'parsed-materials-v1', input: {
+        kind: 'web', sourceId: 'snapshot', sourceHash: 'snapshot:html-hash:1',
+        parserKey: oldParserKey, title: '网页', document: document(),
+      } }),
+    })
+    const png = 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+jRZkAAAAASUVORK5CYII='
+    const mime = [
+      'MIME-Version: 1.0', 'Content-Type: multipart/related; boundary="ChromeBoundary--"', '',
+      '--ChromeBoundary--', 'Content-Type: image/png', 'Content-Transfer-Encoding: base64',
+      'Content-Location: https://example.org/chart.png', '', png, '--ChromeBoundary----', '',
+    ].join('\r\n')
+    const parser = createSummaryParser({
+      ...f.deps,
+      getSnapshot: () => ({ ...f.getSnapshot(), html: '<article><img src="/chart.png" alt="Original chart"></article>', archiveMhtml: Buffer.from(mime).toString('base64') }),
+      parseHtml: parseHtmlSummary,
+    })
+    const result = await parser.parse('web', 'snapshot')
+    const picture = result.document.items.find(item => item.kind === 'picture')
+    expect(picture?.text).toBe('Original chart')
+    expect(picture?.images[0]?.data).toMatch(/^data:image\/png;base64,/)
+    expect(result.document.warnings).toEqual([])
   })
   it('rejects a replaced source before saving late parsing results', async () => {
     const f = fixture()

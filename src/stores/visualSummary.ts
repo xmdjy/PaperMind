@@ -3,7 +3,7 @@ import { ref } from 'vue'
 import type { LLMProfile } from './chat'
 import { isParsedDocument } from '../utils/doclingDocument'
 import { parsedSummaryFingerprint, PARSED_SUMMARY_PROMPT_VERSION, requestParsedSummary, type ParsedSummaryInput } from '../utils/parsedSummary'
-import { replaceSummaryAssets, normalizeVisualSummaryMath, type VisualReport, type VisualSummaryResult } from '../utils/visualSummary'
+import { replaceSummaryAssets, type VisualReport, type VisualSummaryResult } from '../utils/visualSummary'
 
 export interface VisualSummaryState { preparing: boolean; generating: boolean; progress: string; error: string; content: string; report: VisualReport | null; truncated: boolean }
 interface ParsedReport extends VisualReport { fingerprint: string; parserKey: string }
@@ -134,7 +134,7 @@ export const useVisualSummaryStore = defineStore('visualSummary', () => {
         const result = await requestParsedSummary(input, profile, continuation, controller.signal)
         check(key, revision)
         const allowed = new Set(input.document.items.flatMap(item => item.images.flatMap(image => image.assetId ? [image.assetId] : [])))
-        const content = replaceSummaryAssets(normalizeVisualSummaryMath((continuation ? continuation + '\n\n' : '') + result.content), allowed)
+        const content = replaceSummaryAssets((continuation ? continuation + '\n\n' : '') + result.content, allowed)
         const next: ParsedReport = { ...result, content, fingerprint, parserKey: input.parserKey, sourceHash: input.sourceHash, model: profile.model, promptVersion: PARSED_SUMMARY_PROMPT_VERSION, createdAt: Date.now() }
         await window.db.documentSummary.save({ kind: input.kind, sourceId: input.sourceId, slot: 'report', sourceHash: input.sourceHash, payload: JSON.stringify(next) })
         check(key, revision)

@@ -1,7 +1,7 @@
 import type { LLMProfile } from '../stores/chat'
 import { ASSET_ID_PATTERN, IMAGE_DATA_PATTERN, type DocumentItem, type ParsedDocument, type SourceRegion } from './doclingDocument'
 import { readBoundedJson, validateServiceUrl } from './serviceSecurity'
-import { hashVisualSource, normalizeVisualSummaryMath, replaceSummaryAssets, type VisualReport } from './visualSummary'
+import { hashVisualSource, replaceSummaryAssets, type VisualReport } from './visualSummary'
 
 export interface ParsedSummaryInput {
   kind: 'paper' | 'web'
@@ -138,7 +138,7 @@ export async function requestParsedSummary(input: ParsedSummaryInput, profile: L
     const content = data.choices?.[0]?.message?.content
     if (typeof content !== 'string' || !content.trim()) throw new Error('摘要模型返回空摘要，请确认当前 API 支持提供的文本或图片输入')
     return {
-      content: replaceSummaryAssets(normalizeVisualSummaryMath(content), allowedAssets),
+      content: replaceSummaryAssets(content, allowedAssets),
       truncated: data.choices?.[0]?.finish_reason === 'length', usage: data.usage ?? null,
       elapsedMs: Date.now() - started,
     }
