@@ -111,7 +111,7 @@ function archiveResources(snapshot: PreviewSnapshot, warnings: string[]): Map<st
       for (const line of body.split(/\r?\n/)) {
         if (line.trimEnd() === marker || line.trimEnd() === `${marker}--`) {
           if (part) visit(part.join('\r\n'), entityBase, depth + 1)
-          part = line.trimEnd().endsWith('--') ? undefined : []
+          part = line.trimEnd() === `${marker}--` ? undefined : []
         } else if (part) part.push(line)
       }
       if (part?.length) visit(part.join('\r\n'), entityBase, depth + 1)

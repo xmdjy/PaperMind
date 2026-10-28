@@ -33,7 +33,7 @@ export function createSummaryParser(deps: Dependencies) {
     const sourceHash = paper ? hash(paper.base64) : `${sourceId}:${snapshot!.contentHash}:${snapshot!.capturedAt}`
     const parserKey = hash(JSON.stringify({ protocol: PROTOCOL, kind,
       ...(settings ? { baseUrl: settings.baseUrl, ocr: settings.ocr, formula: settings.formula,
-        presets: 'heron-tableformer-accurate-rapidocr-codeformulav2-v1' } : {}),
+        presets: 'heron-tableformer-accurate-rapidocr-codeformulav2-v1' } : { htmlParser: 'html-native-mhtml-v2' }),
     }))
     return { kind, sourceId, sourceHash, parserKey, title: paper?.title ?? snapshot!.title, paper, snapshot, settings }
   }
