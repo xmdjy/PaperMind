@@ -1,6 +1,6 @@
 import { describe, expect, it, vi, afterEach } from 'vitest'
 import { renderMarkdown } from '../utils/markdown'
-import { parseMaterialLocations, replaceSummaryAssets, requestVisualCompletion, SUMMARY_PROMPT, splitVisualPages, normalizeVisualSummaryMath, getVisualCropGeometry } from '../utils/visualSummary'
+import { parseMaterialLocations, replaceSummaryAssets, requestVisualCompletion, SUMMARY_PROMPT, splitVisualPages, getVisualCropGeometry } from '../utils/visualSummary'
 const page = { page: 0, width: 100, height: 200, data: 'data:image/jpeg;base64,YQ==' }
 afterEach(() => vi.unstubAllGlobals())
 describe('visual summary boundary', () => {
@@ -55,15 +55,6 @@ describe('visual summary boundary', () => {
   })
   it('batches all pages and refuses excessive summary input rather than dropping pages', () => {
     expect(splitVisualPages(Array.from({ length: 17 }, (_, pageNo) => ({ ...page, page: pageNo })), 8).map(x => x.length)).toEqual([8, 8, 1])
-  })
-  it('normalizes real model math delimiters while preserving notation and literal code', () => {
-    const raw = 'For \\(h_i\\), use:\n\n\\[h_i = \\operatorname{RMSNorm}(x_i)\\]\n\n`\\(literal\\)`\n\n```tex\n\\[code\\]\n```'
-    const normalized = normalizeVisualSummaryMath(raw)
-    expect(normalized).toContain('$h_i$')
-    expect(normalized).toContain('$$\nh_i = \\operatorname{RMSNorm}(x_i)\n$$')
-    expect(normalized).toContain('`\\(literal\\)`')
-    expect(normalized).toContain('```tex\n\\[code\\]\n```')
-    expect(renderMarkdown(normalized)).toContain('class="katex-display"')
   })
   it('rejects unconfigured cloud credentials before a network request', async () => {
     const fetcher = vi.fn(); vi.stubGlobal('fetch', fetcher)

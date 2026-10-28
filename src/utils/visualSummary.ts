@@ -1,5 +1,5 @@
 import { validateServiceUrl, readBoundedJson } from './serviceSecurity'
-import MarkdownIt from 'markdown-it'
+export { replaceSummaryAssets } from './markdownAssets'
 import type { LLMProfile } from '../stores/chat'
 
 export interface VisualSummaryPage { page: number; width: number; height: number; data: string }
@@ -85,81 +85,6 @@ export async function cropVisualMaterial(page: VisualSummaryPage, item: VisualMa
     ? '公式原文区域：整行裁剪并保留上下文，可能包含相邻正文'
     : '原文素材区域：在模型定位框外保留页面边距以避免标签被裁断'
   return canvas.toDataURL('image/png')
-}
-export function replaceSummaryAssets(content: string, allowed: Set<string>): string {
-  // Use the same Markdown parser as display: reference, collapsed, escaped and
-  // inline image syntaxes must all obey the source-owned asset allowlist.
-  const parser = new MarkdownIt({ html: false })
-  const env: Record<string, unknown> = {}
-  // Parse unsafe schemes too so they become explicit unavailable-image notices.
-  // This parser never renders content or opens any URL.
-  parser.validateLink = () => true
-  parser.parse(content, env)
-  const rules = parser.inline.ruler.getRules('')
-  parser.inline.ruler.disable(['image'])
-  const otherRules = new Set(parser.inline.ruler.getRules(''))
-  const imageRule = rules.find(rule => !otherRules.has(rule))
-  parser.inline.ruler.enable(['image'])
-  if (!imageRule) throw new Error('无法校验摘要图片引用')
-  const edits: Array<{ start: number; end: number; replacement: string }> = []
-  parser.inline.ruler.at('image', (state, silent) => {
-    const start = state.pos
-    const matched = imageRule(state, silent)
-    if (matched && !silent && state.src === content) {
-      const token = state.tokens.at(-1)!
-      const source = token.attrGet('src') || ''
-      const match = /^asset:([a-f0-9]{64})$/.exec(source)
-      const alt = token.content.replace(/[\[\]\n]/g, ' ')
-      edits.push({ start, end: state.pos, replacement: match && allowed.has(match[1])
-        ? `![${alt}](asset:${match[1]})` : `[图片不可用：${alt || '未知图片'}]` })
-    }
-    return matched
-  })
-  parser.inline.parse(content, parser, env, [])
-  for (const edit of edits.sort((a, b) => b.start - a.start)) content = content.slice(0, edit.start) + edit.replacement + content.slice(edit.end)
-  return content.replace(/<img\b[^>]*>/gi, '[图片不可用：不受支持的图片引用]')
-}
-
-/** Convert model delimiters for portable Markdown without touching literal code. */
-export function normalizeVisualSummaryMath(content: string): string {
-  const parser = new MarkdownIt({ html: false })
-  const env = {}
-  const tokens = parser.parse(content, env)
-  const offsets = [0]
-  for (let i = 0; i < content.length; i++) if (content[i] === '\n') offsets.push(i + 1)
-  offsets.push(content.length)
-  const protectedRanges: Array<{ start: number; end: number }> = []
-  for (const token of tokens) {
-    if ((token.type === 'fence' || token.type === 'code_block') && token.map) protectedRanges.push({
-      start: offsets[token.map[0]], end: offsets[token.map[1]] ?? content.length,
-    })
-  }
-  const rules = parser.inline.ruler.getRules('')
-  parser.inline.ruler.disable(['backticks'])
-  const otherRules = new Set(parser.inline.ruler.getRules(''))
-  const backticks = rules.find(rule => !otherRules.has(rule))
-  parser.inline.ruler.enable(['backticks'])
-  if (!backticks) throw new Error('无法识别摘要中的代码区域')
-  parser.inline.ruler.at('backticks', (state, silent) => {
-    const start = state.pos, count = state.tokens.length
-    const matched = backticks(state, silent)
-    if (matched && !silent && state.src === content && state.tokens.length > count && state.tokens.at(-1)?.type === 'code_inline') {
-      protectedRanges.push({ start, end: state.pos })
-    }
-    return matched
-  })
-  parser.inline.parse(content, parser, env, [])
-  const normalize = (text: string) => text
-    .replace(/\\\[\s*([\s\S]*?)\s*\\\]/g, (_all, formula: string) => `\n$$\n${formula.trim()}\n$$\n`)
-    .replace(/\\\(\s*([^\n]*?)\s*\\\)/g, (_all, formula: string) => `$${formula.trim()}$`)
-  let result = '', cursor = 0
-  for (const range of protectedRanges.sort((a, b) => a.start - b.start || b.end - a.end)) {
-    if (range.end <= cursor) continue
-    if (range.start > cursor) result += normalize(content.slice(cursor, range.start))
-    result += content.slice(Math.max(cursor, range.start), range.end)
-    cursor = range.end
-  }
-  return result + normalize(content.slice(cursor))
 }
 export function validateVisualPages(pages: VisualSummaryPage[]) {
   if (!pages.length) throw new Error('没有可供模型阅读的原文页面')

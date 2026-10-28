@@ -115,14 +115,20 @@ describe('parsed document summary transport', () => {
     expect(fetcher).toHaveBeenCalledTimes(1)
   })
 
-  it('only permits original attached asset IDs and normalizes formula delimiters', async () => {
+  it('only permits original attached asset IDs and preserves formula source', async () => {
     const source = input([item({ id: 'picture-1', kind: 'picture', images: [{ assetId, data: imageData }] })])
     fetcher.mockImplementation(() => Promise.resolve(completion(`\\(x_i\\)\n![原图](asset:${assetId})\n![外图](https://example.org/foreign.png)\n![虚构](asset:${'c'.repeat(64)})`)))
     const result = await requestParsedSummary(source, profile)
-    expect(result.content).toContain('$x_i$')
+    expect(result.content).toContain('\\(x_i\\)')
     expect(result.content).toContain(`![原图](asset:${assetId})`)
     expect(result.content).not.toContain('https://example.org')
     expect(result.content).not.toContain('c'.repeat(64))
+  })
+
+  it('preserves Markdown containers, code and URLs in model output', async () => {
+    const content = '> \\[x^2\\]\n\n- before\n\n  \\[x^2\\]\n\n  after\n\n`\\(literal\\)`\n\n[literal](https://example.org/\\(x\\))'
+    fetcher.mockImplementation(() => Promise.resolve(completion(content)))
+    expect((await requestParsedSummary(input(), profile)).content).toBe(content)
   })
 
   it('refuses oversized UTF-8 text rather than sending a partial source', async () => {
