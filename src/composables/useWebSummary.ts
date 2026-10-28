@@ -1,13 +1,12 @@
 import { computed, reactive, ref, watch, type Ref } from 'vue'
 import { useVisualSummaryStore } from '../stores/visualSummary'
 import { useChatStore, type LLMProfile } from '../stores/chat'
-import { renderSummaryPdf } from '../utils/visualSummaryPdf'
-import type { VisualSummaryInput } from '../utils/visualSummary'
+import type { ParsedSummaryInput } from '../utils/parsedSummary'
 import type { WebSnapshotPreview } from '../types/webQa'
 
 // These tasks outlive their view. Closing the preview must not close the separate
-// snapshot renderer or cancel the model request.
-const pending = new WeakMap<object, Map<string, Promise<VisualSummaryInput>>>()
+// HTML parser or cancel the model request.
+const pending = new WeakMap<object, Map<string, Promise<ParsedSummaryInput>>>()
 const captures = new WeakMap<object, Record<string, { busy: boolean; error: string; pageId: string }>>()
 const revisions = new WeakMap<object, Map<string, number>>()
 export function webSummaryHash(snapshot: WebSnapshotPreview) {
@@ -29,7 +28,7 @@ export function useWebSummary(selected: Ref<WebSnapshotPreview | null>) {
   const capture = computed(() => selected.value ? captureStates[selected.value.id] : undefined)
   const busy = computed(() => !!(capture.value?.busy || state.value?.preparing || state.value?.generating))
   const error = computed(() => capture.value?.error || state.value?.error || cacheError.value)
-  const progress = computed(() => capture.value?.busy ? '正在从已保存的网页快照准备原文页面…' : state.value?.progress || '正在处理原文…')
+  const progress = computed(() => capture.value?.busy ? '正在解析已保存网页的正文与素材…' : state.value?.progress || '正在处理原文…')
   let version = 0
   watch(selected, async snapshot => {
     const current = ++version
@@ -41,7 +40,7 @@ export function useWebSummary(selected: Ref<WebSnapshotPreview | null>) {
     finally { if (version === current) cacheLoading.value = false }
   }, { immediate: true })
 
-  async function inputFor(snapshot: WebSnapshotPreview): Promise<VisualSummaryInput> {
+  async function inputFor(snapshot: WebSnapshotPreview): Promise<ParsedSummaryInput> {
     const key = webSummaryHash(snapshot)
     const existing = tasks.get(key)
     if (existing) return existing
@@ -50,14 +49,12 @@ export function useWebSummary(selected: Ref<WebSnapshotPreview | null>) {
     const run = (async () => {
       captureStates[snapshot.id] = { busy: true, error: '', pageId: snapshot.pageId }
       try {
-        if (!snapshot.hasOriginalAppearance && !snapshot.hasSummaryVisual) throw new Error('此网页没有原貌快照，请更新缓存后生成摘要')
-        const pdf = await window.preview.summaryPdf(snapshot.id)
+        const input = await window.db.documentSummary.parse('web', snapshot.id)
         check()
-        const pages = await renderSummaryPdf(pdf)
-        check()
-        return { kind: 'web' as const, sourceId: snapshot.id, title: snapshot.title, sourceHash: key, pages }
+        if (input.kind !== 'web' || input.sourceId !== snapshot.id || input.sourceHash !== key) throw new Error('网页快照版本已变化，请重新选择后生成')
+        return input
       } catch (cause) {
-        if ((sourceRevisions.get(snapshot.id) ?? 0) === revision) captureStates[snapshot.id].error = cause instanceof Error ? cause.message : '网页页面准备失败'
+        if ((sourceRevisions.get(snapshot.id) ?? 0) === revision) captureStates[snapshot.id].error = cause instanceof Error ? cause.message : '网页解析失败'
         throw cause
       } finally { if ((sourceRevisions.get(snapshot.id) ?? 0) === revision) captureStates[snapshot.id].busy = false }
     })()

@@ -2,7 +2,7 @@ import { spawn, type ChildProcess } from 'node:child_process'
 import { connect } from 'node:net'
 
 const LOCAL_PORT = 5001
-const SSH_HOST = 'xmdjy@101.76.222.151'
+const SSH_HOST = 'ubuntu@101.76.222.224'
 const STARTUP_TIMEOUT_MS = 15_000
 
 let tunnel: ChildProcess | null = null

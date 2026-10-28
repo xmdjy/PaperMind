@@ -41,7 +41,7 @@ async function requestJson(path: string, settings: DoclingSettings, init: Reques
   } finally { clearTimeout(timer); activeRequests-- }
 }
 
-export async function convertPdf(bytes: Uint8Array, fileName: string, value: DoclingSettings, request: Request = fetch, connect: Connect = ensureManagedDoclingTunnel): Promise<ParsedDocument> {
+async function convertPdfDocument(bytes: Uint8Array, fileName: string, value: DoclingSettings, request: Request, connect: Connect, forSummary: boolean): Promise<ParsedDocument> {
   const settings = normalizeDoclingSettings(value)
   if (bytes.byteLength > MAX_PDF_BYTES) throw new Error('PDF 超过 Docling 上传大小上限（64 MiB）')
   const body = new FormData()
@@ -51,17 +51,30 @@ export async function convertPdf(bytes: Uint8Array, fileName: string, value: Doc
     include_images: 'true', images_scale: '2', do_table_structure: 'true', table_mode: 'accurate',
     do_ocr: String(settings.ocr), do_formula_enrichment: String(settings.formula),
     document_timeout: String(settings.timeoutSeconds),
+    ...(forSummary ? {
+      layout_preset: 'layout_heron_default', ocr_engine: 'rapidocr', ocr_preset: 'rapidocr',
+      table_structure_preset: 'tableformer_v1_accurate', code_formula_preset: 'codeformulav2',
+    } : {}),
   }
-  for (const [key, value] of Object.entries(options)) body.append(key, value)
+  for (const [key, value] of Object.entries(options)) if (value !== undefined) body.append(key, value)
   const result = await requestJson('/v1/convert/file', settings, { method: 'POST', body }, request, connect)
   if (!['success', 'partial_success'].includes(result?.status)) throw new Error('Docling 文档解析失败，请检查服务模型配置后重试')
+  if (forSummary && result.status === 'partial_success') throw new Error('Docling 仅完成部分解析，无法生成完整摘要，请检查服务模型配置后重试')
   let json = result.document?.json_content
   if (typeof json === 'string') {
     try { json = JSON.parse(json) } catch { throw new Error('Docling 文档 JSON 内容无效') }
   }
-  const document = normalizeDoclingDocument(json)
+  const document = normalizeDoclingDocument(json, { preserveAllPictures: forSummary })
   if (result.status === 'partial_success') document.warnings.push('Docling 仅完成部分解析，部分内容或素材可能缺失。')
   return document
+}
+
+export async function convertPdf(bytes: Uint8Array, fileName: string, value: DoclingSettings, request: Request = fetch, connect: Connect = ensureManagedDoclingTunnel): Promise<ParsedDocument> {
+  return convertPdfDocument(bytes, fileName, value, request, connect, false)
+}
+
+export async function convertPdfForSummary(bytes: Uint8Array, fileName: string, value: DoclingSettings, request: Request = fetch, connect: Connect = ensureManagedDoclingTunnel): Promise<ParsedDocument> {
+  return convertPdfDocument(bytes, fileName, value, request, connect, true)
 }
 
 export async function testDoclingConnection(value: DoclingSettings, request: Request = fetch, connect: Connect = ensureManagedDoclingTunnel): Promise<string> {

@@ -11,6 +11,16 @@ export interface SourceRegion { page: number; x: number; y: number; width: numbe
 export interface TextProvenance { page: number; start: number; end: number; region?: SourceRegion }
 export interface DocumentCell { text: string; region: SourceRegion }
 export interface DocumentImage { page?: number; data?: string; assetId?: string }
+export interface DocumentTableCell {
+  text: string
+  row: number
+  column: number
+  rowSpan: number
+  colSpan: number
+  columnHeader: boolean
+  rowHeader: boolean
+}
+export interface DocumentTable { numRows: number; numCols: number; cells: DocumentTableCell[] }
 export interface DocumentItem {
   id: string
   kind: 'text' | 'heading' | 'picture' | 'table' | 'formula'
@@ -23,6 +33,10 @@ export interface DocumentItem {
   inBody?: boolean
   cells?: DocumentCell[]
   images: DocumentImage[]
+  level?: number
+  anchor?: string
+  table?: DocumentTable
+  formulaFormat?: 'latex' | 'mathml'
 }
 export interface ParsedDocument { version: 1; items: DocumentItem[]; warnings: string[] }
 export interface DoclingRecord { document: ParsedDocument; sourceHash: string; configHash: string; cached: boolean }
@@ -52,6 +66,19 @@ const object = (value: unknown): JsonObject => value && typeof value === 'object
 const list = (value: unknown): any[] => Array.isArray(value) ? value : []
 const string = (value: unknown): string => typeof value === 'string' ? value : ''
 
+function isDocumentTable(value: unknown): value is DocumentTable {
+  const table = object(value)
+  return Number.isInteger(table.numRows) && table.numRows >= 0 && Number.isInteger(table.numCols) && table.numCols >= 0
+    && Array.isArray(table.cells) && table.cells.every((value: unknown) => {
+      const cell = object(value)
+      return typeof cell.text === 'string' && Number.isInteger(cell.row) && cell.row >= 0
+        && Number.isInteger(cell.column) && cell.column >= 0
+        && Number.isInteger(cell.rowSpan) && cell.rowSpan > 0 && cell.row + cell.rowSpan <= table.numRows
+        && Number.isInteger(cell.colSpan) && cell.colSpan > 0 && cell.column + cell.colSpan <= table.numCols
+        && typeof cell.columnHeader === 'boolean' && typeof cell.rowHeader === 'boolean'
+    })
+}
+
 export function normalizeDoclingSettings(value: unknown): DoclingSettings {
   const raw = object(value)
   let baseUrl = (string(raw.baseUrl).trim() || DEFAULT_DOCLING_SETTINGS.baseUrl).replace(/\/+$/, '')
@@ -78,6 +105,10 @@ export function isParsedDocument(value: unknown): value is ParsedDocument {
       return typeof i.id === 'string' && ['text', 'heading', 'picture', 'table', 'formula'].includes(i.kind)
         && (i.id.startsWith(`${i.kind}-`) && /^[1-9]\d*$/.test(i.id.slice(i.kind.length + 1)) || /^item-\d+$/.test(i.id))
         && typeof i.text === 'string' && typeof i.caption === 'string'
+        && (i.level === undefined || i.kind === 'heading' && Number.isInteger(i.level) && i.level > 0)
+        && (i.anchor === undefined || typeof i.anchor === 'string')
+        && (i.table === undefined || i.kind === 'table' && isDocumentTable(i.table))
+        && (i.formulaFormat === undefined || i.kind === 'formula' && ['latex', 'mathml'].includes(i.formulaFormat))
         && Array.isArray(i.pages) && i.pages.every((p: unknown) => Number.isInteger(p) && Number(p) >= 0)
         && Array.isArray(i.regions) && i.regions.every((r: SourceRegion) => r && Number.isInteger(r.page) && r.page >= 0
           && [r.x, r.y, r.width, r.height].every(Number.isFinite) && r.x >= 0 && r.y >= 0 && r.width > 0 && r.height > 0 && r.x + r.width <= 1.00001 && r.y + r.height <= 1.00001)
@@ -100,7 +131,7 @@ export function isParsedDocument(value: unknown): value is ParsedDocument {
     })
 }
 
-export function normalizeDoclingDocument(input: unknown): ParsedDocument {
+export function normalizeDoclingDocument(input: unknown, options: { preserveAllPictures?: boolean } = {}): ParsedDocument {
   const doc = object(input)
   const items: DocumentItem[] = []
   const counts: Record<DocumentItem['kind'], number> = { text: 0, heading: 0, picture: 0, table: 0, formula: 0 }
@@ -128,7 +159,7 @@ export function normalizeDoclingDocument(input: unknown): ParsedDocument {
   const nearbyFigureCaptions = list(doc.texts).map((value, index) => {
     const raw = object(value)
     return { ref: string(raw.self_ref) || `#/texts/${index}`, text: string(raw.text), regions: regions(raw), label: string(raw.label) }
-  }).filter(candidate => candidate.label === 'caption' && FIGURE_CAPTION.test(candidate.text))
+  }).filter(candidate => candidate.label === 'caption' && (options.preserveAllPictures || FIGURE_CAPTION.test(candidate.text)))
   const usedFigureCaptions = new Set<string>()
   const visit = (raw: JsonObject, path: string, inBody = false) => {
     const key = string(raw.self_ref) || path
@@ -138,15 +169,33 @@ export function normalizeDoclingDocument(input: unknown): ParsedDocument {
       for (const ref of list(raw.children)) visit(resolve(ref), string(ref?.$ref), inBody)
       return
     }
-    if (raw.content_layer === 'furniture' || ['caption', 'page_header', 'page_footer'].includes(raw.label)) return
     const kind: DocumentItem['kind'] = path.startsWith('#/pictures/') ? 'picture'
       : path.startsWith('#/tables/') ? 'table' : raw.label === 'formula' ? 'formula'
       : ['section_header', 'title'].includes(raw.label) ? 'heading' : 'text'
+    if (!(options.preserveAllPictures && (kind === 'picture' || raw.label === 'caption'))
+      && (raw.content_layer === 'furniture' || ['caption', 'page_header', 'page_footer'].includes(raw.label))) return
     let text = string(raw.text)
     let cells: DocumentCell[] = []
+    let table: DocumentTable | undefined
     if (kind === 'table') {
-      const rawCells = list(object(raw.data).table_cells).map(c => object(c)).sort((a, b) => (a.start_row_offset_idx ?? 0) - (b.start_row_offset_idx ?? 0) || (a.start_col_offset_idx ?? 0) - (b.start_col_offset_idx ?? 0))
+      const data = object(raw.data)
+      const rawCells = list(data.table_cells).map(c => object(c)).sort((a, b) => (a.start_row_offset_idx ?? 0) - (b.start_row_offset_idx ?? 0) || (a.start_col_offset_idx ?? 0) - (b.start_col_offset_idx ?? 0))
       text = rawCells.map(c => `[row ${c.start_row_offset_idx ?? '?'}, col ${c.start_col_offset_idx ?? '?'}] ${string(c.text)}`).join('\n') || text
+      if (Array.isArray(data.table_cells)) {
+        const structuredCells: DocumentTableCell[] = rawCells.map(cell => ({
+          text: string(cell.text), row: cell.start_row_offset_idx, column: cell.start_col_offset_idx,
+          rowSpan: cell.row_span ?? (cell.end_row_offset_idx === undefined ? 1 : cell.end_row_offset_idx - cell.start_row_offset_idx),
+          colSpan: cell.col_span ?? (cell.end_col_offset_idx === undefined ? 1 : cell.end_col_offset_idx - cell.start_col_offset_idx),
+          columnHeader: cell.column_header === true, rowHeader: cell.row_header === true,
+        }))
+        const candidate = {
+          numRows: data.num_rows ?? structuredCells.reduce((size, cell) => Math.max(size, cell.row + cell.rowSpan), 0),
+          numCols: data.num_cols ?? structuredCells.reduce((size, cell) => Math.max(size, cell.column + cell.colSpan), 0),
+          cells: structuredCells,
+        }
+        if (isDocumentTable(candidate)) table = candidate
+        else if (options.preserveAllPictures) throw new Error('Docling 表格结构不完整，无法生成完整摘要')
+      }
       const tablePages = [...new Set<number>(list(raw.prov).map(p => p?.page_no).filter(p => Number.isInteger(p) && p >= 1))]
       cells = rawCells.flatMap(cell => {
         const pageNo = Number.isInteger(cell.page_no) ? cell.page_no : tablePages.length === 1 ? tablePages[0] : null
@@ -158,9 +207,12 @@ export function normalizeDoclingDocument(input: unknown): ParsedDocument {
     let captionRegions = kind === 'picture' ? list(raw.captions).flatMap(ref => regions(resolve(ref))) : []
     const pages = [...new Set<number>(list(raw.prov).map(p => p?.page_no).filter(p => Number.isInteger(p) && p >= 1).map(p => p - 1))].sort((a, b) => a - b)
     const uri = string(object(raw.image).uri)
+    if (options.preserveAllPictures && uri.startsWith('data:image/') && uri.length > MAX_IMAGE_BYTES * 1.4) {
+      throw new Error('Docling 图片超过材料大小上限（12 MiB），无法生成完整摘要')
+    }
     const images: DocumentImage[] = IMAGE_DATA_PATTERN.test(uri) && uri.length <= MAX_IMAGE_BYTES * 1.4 ? [{ data: uri, ...(pages[0] !== undefined ? { page: pages[0] } : {}) }] : []
     const pictureRegions = kind === 'picture' ? regions(raw) : []
-    if (kind === 'picture' && inBody && !caption) {
+    if (kind === 'picture' && (inBody || options.preserveAllPictures) && !caption) {
       const nearest = nearbyFigureCaptions.filter(candidate => !usedFigureCaptions.has(candidate.ref))
         .map(candidate => ({ ...candidate, gap: Math.min(...pictureRegions.flatMap(picture => candidate.regions
           .filter(region => region.page === picture.page && region.y >= picture.y + picture.height - 0.005
@@ -188,9 +240,13 @@ export function normalizeDoclingDocument(input: unknown): ParsedDocument {
     })
     const item: DocumentItem = { id: `${kind}-${counts[kind] + 1}`, kind, text, caption, pages, regions: kind === 'picture' ? pictureRegions : regions(raw), images,
       ...(provenance.length ? { provenance } : {}),
+      ...(kind === 'heading' && Number.isInteger(raw.level) && raw.level > 0 ? { level: raw.level } : {}),
       ...(kind === 'picture' ? { captionRegions, inBody } : {}),
-      ...(cells.length ? { cells } : {}) }
-    if (kind === 'picture' && !isEligibleFigure(item)) return
+      ...(cells.length ? { cells } : {}),
+      ...(table ? { table } : {}) }
+    if (kind === 'picture' && !options.preserveAllPictures && !isEligibleFigure(item)) return
+    if (options.preserveAllPictures && kind === 'picture' && !images.length) warnings.push(`${item.id}：Docling 未提供可用的嵌入图片，摘要中保留缺失图片说明。`)
+    if (options.preserveAllPictures && kind === 'table' && !table) warnings.push(`${item.id}：Docling 未提供表格结构，保留返回的文字内容。`)
     if (kind === 'picture') for (const ref of list(raw.captions)) usedFigureCaptions.add(string(ref?.$ref))
     counts[kind]++
     items.push(item)
@@ -198,6 +254,6 @@ export function normalizeDoclingDocument(input: unknown): ParsedDocument {
   for (const ref of list(object(doc.body).children)) visit(resolve(ref), string(ref?.$ref), true)
   // Old or partial exports can omit body. Include unreferenced evidence without duplicating references.
   for (const collection of ['texts', 'pictures', 'tables']) list(doc[collection]).forEach((raw, index) => visit(object(raw), `#/${collection}/${index}`))
-  if (!items.some(i => i.text || i.caption)) throw new Error('Docling 未返回可用于解读的文档内容')
+  if (!items.some(i => i.text || i.caption || options.preserveAllPictures && i.kind === 'picture')) throw new Error('Docling 未返回可用于解读的文档内容')
   return { version: 1, items, warnings }
 }

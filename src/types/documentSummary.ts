@@ -1,3 +1,5 @@
+import type { ParsedSummaryInput } from '../utils/parsedSummary'
+
 export type SummarySourceKind = 'paper' | 'web'
 export type SummaryRecordSlot = 'materials' | 'report' | 'task'
 
@@ -15,6 +17,7 @@ export interface DocumentSummaryRecord extends DocumentSummaryWrite {
 }
 
 export interface DocumentSummaryApi {
+  parse: (kind: SummarySourceKind, sourceId: string) => Promise<ParsedSummaryInput>
   get: (kind: SummarySourceKind, sourceId: string, slot: SummaryRecordSlot) => Promise<DocumentSummaryRecord | null>
   save: (record: DocumentSummaryWrite) => Promise<DocumentSummaryRecord>
   saveAsset: (kind: SummarySourceKind, sourceId: string, data: string) => Promise<string>
