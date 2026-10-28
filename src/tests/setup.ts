@@ -3,6 +3,7 @@ import { vi } from 'vitest'
 
 const mockDb = {
   documentSummary: {
+    parse: vi.fn().mockRejectedValue(new Error('未配置摘要解析结果')),
     get: vi.fn().mockResolvedValue(null),
     save: vi.fn().mockImplementation(record => Promise.resolve({ ...record, updatedAt: Date.now() })),
     saveAsset: vi.fn().mockResolvedValue('a'.repeat(64)),

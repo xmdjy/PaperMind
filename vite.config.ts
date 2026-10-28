@@ -106,7 +106,7 @@ export default defineConfig({
             outDir: 'dist-electron',
             rollupOptions: {
               // native module: keep external, loaded from node_modules at runtime
-              external: ['better-sqlite3'],
+              external: ['better-sqlite3', 'sharp'],
             },
           },
         },

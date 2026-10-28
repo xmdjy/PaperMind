@@ -1142,7 +1142,7 @@ export const useChatStore = defineStore('chat', () => {
         const paper = await wait(window.db.paper.get(paperId))
         check()
         const title = paper?.title || paperId
-        progress('准备原文页面与素材')
+        progress('准备正文、图表与公式')
         // The application-owned job survives route changes and independent chat cancellation.
         const visual = await wait(useVisualSummaryStore().generatePaper(paperId, profile, force, previous))
         check()
@@ -1170,7 +1170,7 @@ export const useChatStore = defineStore('chat', () => {
     } finally { delete abstractProgress.value[conv.id] }
   }
 
-  /** Both summary entry points share original-page vision and material preparation. */
+  /** Both summary entry points share parsed document materials and generation. */
   async function generatePaperAbstract(paperId: string, force = false): Promise<PaperAbstractReport> {
     const ongoing = paperAbstractJobs.get(paperId)
     if (ongoing) return ongoing

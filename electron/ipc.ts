@@ -7,7 +7,9 @@ import { kbApi, paperApi, chatApi, highlightApi, settingsApi, indexApi, treeApi,
 import { createDoclingFacade } from './docling'
 import { getDocumentSummaryRepository } from './db'
 import { captureWebSummaryPdf } from './webSummaryCapture'
-import { testDoclingConnection } from './doclingClient'
+import { convertPdfForSummary, testDoclingConnection } from './doclingClient'
+import { createSummaryParser } from './summaryParsing'
+import { parseHtmlSummary } from './htmlSummary'
 import { DOCLING_SETTINGS_KEY } from '../src/utils/doclingDocument'
 import { backupFileName } from '../src/utils/exportSanitize'
 import { clearPreviewData, previewControllerForSender } from './webPreview'
@@ -29,7 +31,20 @@ export function registerIpc() {
   const paperAbstract = getPaperAbstractRepository()
   const webQa = getWebQaRepository()
   const documentSummary = getDocumentSummaryRepository()
+  const summaryParser = createSummaryParser({
+    repository: documentSummary,
+    readPaper: id => {
+      const paper = paperApi.get(id)
+      const base64 = paperApi.readFile(id)
+      return paper && base64 ? { base64, title: paper.title, name: paper.fileName || 'paper.pdf' } : null
+    },
+    getSnapshot: webQa.getSnapshot,
+    getSettings: () => settingsApi.get(DOCLING_SETTINGS_KEY),
+    convertPdf: convertPdfForSummary,
+    parseHtml: parseHtmlSummary,
+  })
   const handlers = {
+    'documentSummary:parse': (_e, kind, sourceId) => summaryParser.parse(kind, sourceId),
     'documentSummary:get': (_e, kind, sourceId, slot) => documentSummary.get(kind, sourceId, slot),
     'documentSummary:save': (_e, record) => documentSummary.save(record),
     'documentSummary:saveAsset': (_e, kind, sourceId, data) => documentSummary.saveAsset(kind, sourceId, data),

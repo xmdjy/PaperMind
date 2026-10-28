@@ -7,6 +7,7 @@ const invoke: TypedInvoke = (channel, ...args) => ipcRenderer.invoke(channel, ..
 // Typed wrapper around ipcRenderer.invoke. Each method maps to a handler in ipc.ts.
 const db: DbApi = {
   documentSummary: {
+    parse: (kind, sourceId) => invoke('documentSummary:parse', kind, sourceId),
     get: (kind, sourceId, slot) => invoke('documentSummary:get', kind, sourceId, slot),
     save: record => invoke('documentSummary:save', record),
     saveAsset: (kind, sourceId, data) => invoke('documentSummary:saveAsset', kind, sourceId, data),

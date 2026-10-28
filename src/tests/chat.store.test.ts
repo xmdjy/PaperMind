@@ -227,26 +227,25 @@ describe('useChatStore', () => {
     expect(firstRoundCalls).toBe(1)
   })
 
-  it('/abstract reads original page images with the current chat model without Docling', async () => {
+  it('/abstract summarizes parsed materials with one current-model request', async () => {
     vi.mocked(window.db.docling.convert).mockClear()
     vi.mocked(window.db.paper.get).mockResolvedValue({
       id: 'paper-1', title: 'Attention Is All You Need', authors: [], abstract: '', year: 2017,
       tags: [], status: 'unread', fileName: 'paper.pdf', fileHash: '', addedAt: 1, knowledgeBaseId: 'default',
     })
-    global.fetch = vi.fn()
-      .mockResolvedValueOnce({ ok: true, json: async () => ({ choices: [{ message: { content: '{"materials":[]}' }, finish_reason: 'stop' }] }) })
-      .mockResolvedValueOnce({ ok: true, json: async () => ({ choices: [{ message: { content: 'A transformer paper summary.' }, finish_reason: 'stop' }] }) })
+    vi.mocked(window.db.documentSummary.parse).mockResolvedValue({ kind: 'paper', sourceId: 'paper-1', title: 'Attention Is All You Need', sourceHash: 'hash', parserKey: 'docling-v1', document: { version: 1, warnings: [], items: [{ id: 'text-1', kind: 'text', text: 'The transformer uses attention.', caption: '', pages: [0], regions: [], images: [] }] } })
+    global.fetch = vi.fn().mockResolvedValue({ ok: true, json: async () => ({ choices: [{ message: { content: 'A transformer paper summary.' }, finish_reason: 'stop' }] }) })
     const store = useChatStore()
     await store.init()
     await store.updateProfile(store.chatProfile.id, { apiKey: 'test-key', model: 'deepseek-flash' })
     const conv = await store.newConversation('Summary', ['paper-1'])
     expect(await store.sendMessage(conv.id, '/abstract')).toBe('A transformer paper summary.')
     expect(conv.messages[1].sources).toEqual([{ label: 'Attention Is All You Need', paperId: 'paper-1' }])
-    expect(global.fetch).toHaveBeenCalledTimes(2)
-    expect(window.db.docling.convert).not.toHaveBeenCalled()
+    expect(global.fetch).toHaveBeenCalledTimes(1)
+    expect(window.db.documentSummary.parse).toHaveBeenCalledWith('paper', 'paper-1')
     expect(vi.mocked(global.fetch).mock.calls[0][0]).toContain('/chat/completions')
-    const request = JSON.parse(String(vi.mocked(global.fetch).mock.calls[1][1]?.body))
-    expect(request.messages[1].content.some((part: { type: string }) => part.type === 'image_url')).toBe(true)
+    const request = JSON.parse(String(vi.mocked(global.fetch).mock.calls[0][1]?.body))
+    expect(request.messages[1].content).toContain('The transformer uses attention.')
   })
 
   it('/abstract requires a selected paper', async () => {

@@ -20,6 +20,10 @@ beforeEach(() => {
     sourceHash: 'visual-test-hash', payload: JSON.stringify({ version: 1, sourceHash: 'visual-test-hash', protocol: 'visual-materials-v2-padded-crops', items: [], coveredPages: [0], usage: [] }),
   } : null)
   db().documentSummary.save.mockReset().mockResolvedValue({})
+  db().documentSummary.parse.mockReset().mockImplementation(async (kind: 'paper' | 'web', id: string) => ({
+    kind, sourceId: id, title: id, sourceHash: 'visual-test-hash', parserKey: 'docling-summary-v1',
+    document: normalizeDoclingDocument({ texts: [{ text: 'Original evidence', prov: [{ page_no: 2 }] }] }),
+  }))
   db().settings.get.mockResolvedValue(null)
   db().chat.listConversations.mockResolvedValue([])
   db().index.list.mockResolvedValue([])
@@ -56,7 +60,7 @@ describe('paper summary tab generation', () => {
     expect(db().docling.convert).not.toHaveBeenCalled()
   })
 
-  it('reads original pages on demand and saves a report without creating a chat message', async () => {
+  it('reads parsed materials on demand and saves a report without creating a chat message', async () => {
     const store = useChatStore()
     await store.init()
     await store.updateProfile(store.chatProfileId, { apiKey: 'test', model: 'summary-model' })
