@@ -23,7 +23,7 @@ describe('managed Docling deployment', () => {
     })
     await ensureManagedDoclingTunnel('http://127.0.0.1:5001')
     expect(mocks.spawn).toHaveBeenCalledWith('ssh', expect.arrayContaining([
-      '-o', 'BatchMode=yes', '-N', '-L', '127.0.0.1:5001:127.0.0.1:5001', 'ubuntu@101.76.222.224',
+      '-o', 'BatchMode=yes', '-N', '-L', '127.0.0.1:5001:127.0.0.1:5001', 'yrhA100',
     ]), { stdio: ['ignore', 'ignore', 'pipe'] })
   })
 })
