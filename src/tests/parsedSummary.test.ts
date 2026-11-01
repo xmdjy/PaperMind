@@ -31,6 +31,23 @@ describe('parsed document summary transport', () => {
   })
   afterEach(() => { vi.unstubAllGlobals(); vi.useRealTimers() })
 
+  it.each(['paper', 'web'] as const)('defaults %s summaries of English sources to Simplified Chinese without a profile prompt', async kind => {
+    await requestParsedSummary({ ...input([item({ text: 'DeepSeek-V3 uses a mixture-of-experts architecture.' })]), kind },
+      { ...profile, systemPrompt: '' })
+    const body = JSON.parse(fetcher.mock.calls[0][1].body)
+    expect(body.messages[0].content).toContain('简体中文')
+    expect(body.messages[0].content).toContain('标题、正文、图表说明')
+    expect(body.messages[0].content).toContain('专有名词')
+    expect(body.messages[1].content).toContain('DeepSeek-V3 uses a mixture-of-experts architecture.')
+  })
+
+  it('reasserts Simplified Chinese when continuing an existing English summary', async () => {
+    await requestParsedSummary(input(), { ...profile, systemPrompt: '' }, '# Previous English summary')
+    const body = JSON.parse(fetcher.mock.calls[0][1].body)
+    expect(body.messages[2]).toEqual({ role: 'assistant', content: '# Previous English summary' })
+    expect(body.messages[3].content).toContain('简体中文')
+  })
+
   it('sends the complete ordered text, heading, table, formula and all original images in one request', async () => {
     const longText = `全文开始${'正文'.repeat(35_000)}全文结束`
     const document = input([
