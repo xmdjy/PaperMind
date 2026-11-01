@@ -113,8 +113,7 @@ async function main() {
     referenceSummary: args.get('--reference-summary') ? readFileSync(args.get('--reference-summary')!, 'utf8') : undefined,
     convertDocling: doclingUrl ? async () => {
       const { convertPdf } = await import('../../electron/doclingClient')
-      return convertPdf(pdfBytes, basename(pdfPath!), { baseUrl: doclingUrl, apiKey: process.env.BENCH_DOCLING_API_KEY ?? '', timeoutSeconds: 600, ocr: true, formula: true }, fetch,
-        async () => { /* explicitly no managed SSH/tunnel: CLI connects only to supplied URL */ })
+      return convertPdf(pdfBytes, basename(pdfPath!), { baseUrl: doclingUrl, apiKey: process.env.BENCH_DOCLING_API_KEY ?? '', timeoutSeconds: 600, ocr: true, formula: true })
     } : undefined,
   })
   const output = JSON.stringify({ ...result, runtime: { embedderInitMs, embedderRevision, backend: smoke ? 'synthetic' : task === 'summary' ? 'not-used-summary-only' : 'node-onnx-local-files', applicationBackend: 'browser-wasm' } }, null, 2) + '\n'

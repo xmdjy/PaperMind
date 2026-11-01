@@ -117,12 +117,11 @@ describe('Docling summary conversion', () => {
     expect(document.items.filter(item => item.kind === 'picture')).toHaveLength(3)
   })
 
-  it('opens the same managed tunnel before summary uploads', async () => {
-    const order: string[] = []
-    const connect = async () => { order.push('connect') }
-    const request = vi.fn(async () => { order.push('upload'); return response() })
-    await convertPdfForSummary(new Uint8Array(), 'study.pdf', DEFAULT_DOCLING_SETTINGS, request, connect)
-    expect(order).toEqual(['connect', 'upload'])
+  it('uploads summary PDFs directly to campus HTTPS', async () => {
+    const request = vi.fn().mockResolvedValue(response())
+    const document = await convertPdfForSummary(new Uint8Array(), 'study.pdf', DEFAULT_DOCLING_SETTINGS, request)
+    expect(request.mock.calls[0][0]).toBe('https://101.76.222.224/v1/convert/file')
+    expect(document.items.length).toBeGreaterThan(0)
   })
 
   it('rejects partial conversions instead of generating a purportedly complete summary', async () => {

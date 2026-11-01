@@ -2,9 +2,9 @@
 
 ## 配置服务
 
-已部署 [docling-serve](https://github.com/docling-project/docling-serve) 于 `ubuntu@101.76.222.224` 的 `127.0.0.1:5001`，提供 `POST /v1/convert/file` 和 `GET /openapi.json`。模型路径、GPU、OCR 和公式模型在服务端配置；PaperMind 仅保存服务根地址和可选 `X-Api-Key`。连接配置见 [Docling 服务器接入](docling-server-224.md)。
+已部署 [docling-serve](https://github.com/docling-project/docling-serve) 于 `ubuntu@101.76.222.224` 的 `127.0.0.1:5001`，提供 `POST /v1/convert/file` 和 `GET /openapi.json`。模型路径、GPU、OCR 和公式模型在服务端配置；PaperMind 仅保存服务根地址和可选 `X-Api-Key`。通过 Nginx 提供校园网 HTTPS 入口，连接配置见 [校园网 Docling 接入](docling-campus-https.md)。
 
-打开设置 → Docling 文档解析。默认地址 `http://127.0.0.1:5001` 会让桌面应用自动建立到 `ubuntu@101.76.222.224` 的 SSH 转发，无需手动开隧道，但本机需要信任已核实的服务器主机密钥并具备免交互登录能力。也可填其他 HTTPS 服务根地址（可含反向代理前缀，如 `https://host/docling`，不填写完整转换接口）、可选 Key、30–1800 秒超时（默认 600）、OCR 与公式识别，点击保存和测试连接。测试连接确认接口可用，不等同于模型转换已经通过。
+打开设置 → Docling 文档解析。默认地址 `https://101.76.222.224` 直接连接校园网服务，无需 SSH。已有配置用户可点击「使用校园网服务」后保存；显式设置的 localhost 地址继续访问本机，不自动建立隧道。也可填其他 HTTPS 服务根地址（可含反向代理前缀，如 `https://host/docling`，不填写完整转换接口）、可选 Key、30–1800 秒超时（默认 600）、OCR 与公式识别，点击保存和测试连接。测试连接确认接口可用，不等同于模型转换已经通过。
 
 应用以 multipart 上传本地 PDF，请求 JSON、`target_type=inbody`、嵌入图片、2 倍图片尺度和准确表格结构，避免服务端开启素材存储后默认返回下载链接。启用公式识别时发送 `do_formula_enrichment=true`；若服务未安装相应模型，请先关闭公式选项，原文公式区域仍可截图。完整协议见 [官方 REST API](https://docling-project.github.io/docling/usage/api_server/rest_api/)。
 

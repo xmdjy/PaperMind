@@ -54,8 +54,9 @@ export function assignTypedDocumentIds(document: ParsedDocument): ParsedDocument
   return document
 }
 export const DOCLING_SETTINGS_KEY = 'docling_config'
+export const DOCLING_CAMPUS_URL = 'https://101.76.222.224'
 export const DEFAULT_DOCLING_SETTINGS: DoclingSettings = {
-  baseUrl: 'http://127.0.0.1:5001', apiKey: '', timeoutSeconds: 600, ocr: true, formula: true,
+  baseUrl: DOCLING_CAMPUS_URL, apiKey: '', timeoutSeconds: 600, ocr: true, formula: true,
 }
 export const IMAGE_DATA_PATTERN = /^data:image\/(png|jpeg|webp);base64,[A-Za-z0-9+/]+={0,2}$/
 export const MAX_IMAGE_BYTES = 12 * 1024 * 1024
@@ -91,7 +92,7 @@ export function normalizeDoclingSettings(value: unknown): DoclingSettings {
     if (url.search || url.hash) throw new Error('请填写 Docling 服务根地址，不包含查询参数或片段')
     baseUrl = url.href.replace(/\/+$/, '')
   }
-  if (baseUrl === 'http://localhost:5001') baseUrl = DEFAULT_DOCLING_SETTINGS.baseUrl
+  if (baseUrl === 'http://localhost:5001') baseUrl = 'http://127.0.0.1:5001'
   const timeoutSeconds = raw.timeoutSeconds ?? DEFAULT_DOCLING_SETTINGS.timeoutSeconds
   if (!Number.isInteger(timeoutSeconds) || timeoutSeconds < 30 || timeoutSeconds > 1800) throw new Error('Docling 超时必须为 30–1800 秒')
   return { baseUrl, apiKey: string(raw.apiKey).trim(), timeoutSeconds, ocr: raw.ocr !== false, formula: raw.formula !== false }
