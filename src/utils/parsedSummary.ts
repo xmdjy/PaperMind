@@ -13,8 +13,9 @@ export interface ParsedSummaryInput {
 }
 
 export const PARSED_SUMMARY_PROTOCOL = 'parsed-document-summary-v1'
-export const PARSED_SUMMARY_PROMPT_VERSION = 'parsed-document-summary-zh-v1'
+export const PARSED_SUMMARY_PROMPT_VERSION = 'parsed-document-summary-zh-v2'
 export const PARSED_SUMMARY_PROMPT = `请通读本次提供的全部解析材料，包括正文、标题层级、表格结构、公式、图注和附带原图，然后用清晰中文写出独立可读的 Markdown 摘要。
+默认输出语言为简体中文，标题、正文、图表说明和公式解释均使用简体中文；专有名词、论文原名、原文引文、公式符号和素材编号可保留原文，必要时补充中文解释。原文使用英文或其他语言不改变摘要的默认输出语言。
 围绕文档要解决的问题、核心方法与推理、主要结果和结论、适用条件与局限组织叙述。根据文档内容取舍篇幅，解释关键关系，不必逐节等量复述或堆砌数字。
 当原图、表格或公式能帮助理解关键内容时，有选择地放在相关解释旁。图片只能引用本次实际附带且有 assetId 的原始图片，使用 ![说明](asset:ID)，ID 必须逐字复制；禁止外部图片、生成替代图或虚构图片。引用图片时解释其具体意义并保留原始图号、materialId 和可用来源位置。缺失图片仅能根据图注说明缺失，不能声称看过图像内容。
 忠实保留重要公式的 LaTeX 记号，用 $...$ 或 $$...$$ 排版，并解释关键符号及公式作用。mathml 字段保留的是原始 MathML 结构，不能将标签去掉后的文字当成等价公式；只有能忠实理解结构时才转写为 LaTeX，否则说明公式转写受限。表格结论必须由提供的单元格支持，不臆造缺失数值、因果关系或比较结果。
@@ -26,7 +27,7 @@ const MAX_TEXT_BYTES = 2 * 1024 * 1024
 const MAX_IMAGE_BYTES = 12 * 1024 * 1024
 const MAX_TOTAL_IMAGE_BYTES = 48 * 1024 * 1024
 const MAX_IMAGES = 120
-const CONTINUE_PROMPT = '请从已有摘要被截断的位置继续，只输出新增内容，不重复已有文字。仍以全部原文材料为依据；如果截断发生在公式或图片引用中，请直接补完该语法。'
+const CONTINUE_PROMPT = '请使用简体中文从已有摘要被截断的位置继续，只输出新增内容，不重复已有文字。仍以全部原文材料为依据；如果截断发生在公式或图片引用中，请直接补完该语法。'
 type TextPart = { type: 'text'; text: string }
 type ImagePart = { type: 'image_url'; image_url: { url: string } }
 type Message = { role: 'system' | 'user' | 'assistant'; content: string | Array<TextPart | ImagePart> }
