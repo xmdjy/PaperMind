@@ -35,7 +35,7 @@ install -d -m 755 /etc/systemd/system/nginx.service.d
 install -m 644 "$script_dir/nginx-systemd.conf" /etc/systemd/system/nginx.service.d/papermind.conf
 systemctl daemon-reload
 systemctl enable nginx
-systemctl restart nginx
+systemctl reload-or-restart nginx
 loginctl enable-linger ubuntu
 if LC_ALL=C ufw status | grep -q '^Status: active'; then
   ufw allow in on enp0s31f6 to 101.76.222.224 port 443 proto tcp comment 'PaperMind Docling HTTPS'

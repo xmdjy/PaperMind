@@ -51,7 +51,7 @@ openssl x509 -req -in server.csr -CA root-ca.pem -CAkey root-ca.key \
 openssl verify -CAfile root-ca.pem -verify_ip 101.76.222.224 server.pem
 ```
 
-现有 `server.ext` 包含 IP SAN、非 CA 约束、serverAuth 和密钥用途。上传时不要上传 `root-ca.key`。通过 `deploy/docling/install-nginx.sh SERVER_CERT SERVER_KEY ROOT_CA_CERT` 安装（root 执行、需已安装 Nginx）；脚本先验证证书、IP 与密钥匹配，备份旧配置、证书，执行 `nginx -t` 后启用服务。脚本只适用于当前专用服务器，会移除默认站点并启用 ubuntu linger；不要直接在共用网站服务器运行。
+现有 `server.ext` 包含 IP SAN、非 CA 约束、serverAuth 和密钥用途。上传时不要上传 `root-ca.key`。通过 `deploy/docling/install-nginx.sh SERVER_CERT SERVER_KEY ROOT_CA_CERT` 安装（root 执行、需已安装 Nginx）；脚本先验证证书、IP 与密钥匹配，备份旧配置、证书，执行 `nginx -t` 后启用服务，运行中使用平滑重载以保留现有解析连接。脚本只适用于当前专用服务器，会移除默认站点并启用 ubuntu linger；不要直接在共用网站服务器运行。
 
 服务器 IP 变化需要重新确定网络入口、签发匹配新 IP 的证书并更新客户端的地址与信任范围。更换根 CA 需要先发布包含新根证书的客户端，再切换服务证书。
 
@@ -81,7 +81,7 @@ Electron 实际 HTTPS 联调发现，带 IP nameConstraints 的 CA 在普通 Nod
 
 | 检查 | 结果 |
 | --- | --- |
-| `npm test` | 174 个 Vitest 文件、2224 项测试；另 24 项脚本测试，全通过 |
+| `npm test` | 174 个 Vitest 文件、2225 项测试；另 24 项脚本测试，全通过 |
 | `npm run typecheck` | 通过 |
 | `npm run security:runtime` | 正式安装的 Electron 44.10.1 / Node 24.22.1 通过 |
 | `npm run build -- --dir --publish never` | Linux x64 目录打包通过；afterPack 核验包内实际运行时并生成证明，未发布安装包 |
