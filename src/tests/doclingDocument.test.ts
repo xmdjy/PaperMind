@@ -70,7 +70,7 @@ describe('Docling document boundary', () => {
     expect(isParsedDocument(document)).toBe(false)
   })
   it('defaults unset deployment settings to the managed Docling endpoint and rejects invalid URLs', () => {
-    expect(DEFAULT_DOCLING_SETTINGS.baseUrl).toBe('http://127.0.0.1:5001')
+    expect(DEFAULT_DOCLING_SETTINGS.baseUrl).toBe('https://101.76.222.224')
     expect(normalizeDoclingSettings(null).baseUrl).toBe(DEFAULT_DOCLING_SETTINGS.baseUrl)
     expect(normalizeDoclingSettings({ baseUrl: '' }).baseUrl).toBe(DEFAULT_DOCLING_SETTINGS.baseUrl)
     expect(() => normalizeDoclingSettings({ baseUrl: 'file:///tmp/model' })).toThrow('HTTP')

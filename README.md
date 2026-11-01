@@ -54,8 +54,8 @@ npm run build
 - 设置页的「论文检索」提供模型状态、索引重建和参考内容上限。默认参考上限 120000 字符，多篇共用；超限会提示调整范围，不截断章节。模型不可用或 PDF 无可用章节时明确报错，不切换旧检索方式。
 - `maxTokens = 0` 表示**不限制**回答长度（OpenAI 兼容端点与 Ollama 不发上限参数；Anthropic 因接口必填会退到兜底值）。
 - 对话中输入 `/abstract` 可生成详细中文图文解读：原文图片/表格截图、关键公式和可跳转页码引用。解析使用设置页中的 Docling 服务，生成使用当前对话模型；不需要 Hugging Face Token。
-- 默认使用 `http://127.0.0.1:5001`。桌面应用在首次连接时自动通过 SSH 转发至 `ubuntu@101.76.222.224` 上的 Docling 服务。需先核实服务器主机密钥并确认可免交互登录；设置页可测试连接，也可改填其他 HTTPS 服务根地址和可选 API Key。支持 OCR、公式识别和解析超时设置。连接配置与验证见 [Docling 服务器接入说明](docs/testing/docling-server-224.md)。
-- Docling 模型部署在服务器，桌面应用不打包 Python 或模型。PDF 经 SSH 转发上传至该服务，原图和解析缓存保存在本地 SQLite，重复摘要复用解析；摘要模型只接收正文、图注、表格数据和公式。
+- 默认使用校园网 HTTPS 服务 `https://101.76.222.224`，无需 SSH、服务器账号或安装系统证书。请先连接可访问该服务器的 SDU 网络。已有本地/自建地址继续保留，可在设置页点击「使用校园网服务」再保存；其他自建 HTTPS 服务和可选 API Key 仍可配置。支持 OCR、公式识别及解析超时。部署和测试见 [校园网 Docling 接入说明](docs/testing/docling-campus-https.md)。
+- Docling 模型部署在服务器，桌面应用不打包 Python 或模型。PDF 经 HTTPS 上传至该服务，原图和解析缓存保存在本地 SQLite，重复摘要复用解析；摘要模型只接收正文、图注、表格数据和公式。
 - 具体服务要求与联调步骤见 [Docling 图文摘要验收](docs/testing/docling-abstract.md)。
 - ⚠️ API Key 以明文存于本地 SQLite 的 `settings` 表，纯单机场景可接受；如需加固可改用 Electron `safeStorage`。
 

@@ -1,4 +1,6 @@
-# Docling 224 服务器接入与真实验证
+# Docling 224 服务器 SSH 接入与真实验证（历史记录）
+
+> 当前版本已切换为免 SSH 的校园网 HTTPS 入口，使用方法与维护见 [校园网 Docling 接入说明](docling-campus-https.md)。以下保留原 SSH 方案的验证记录。
 
 ## 默认连接
 

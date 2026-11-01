@@ -87,11 +87,11 @@
 
       <section class="settings-card">
         <h3>Docling 文档解析</h3>
-        <p class="card-desc">在论文阅读页的「论文摘要」中生成图文解读。默认通过 SSH 连接 ubuntu@101.76.222.224 上的 Docling 服务，需先确认可免交互登录；PDF 将发送到该服务，解读使用当前对话模型，原文图片保存在本地。</p>
+        <p class="card-desc">在论文阅读页的「论文摘要」中生成图文解读。默认连接 SDU 校园网 Docling 服务，请先接入可访问服务器的校园网络；PDF 将发送到该服务，解读使用当前对话模型，原文图片保存在本地。</p>
         <p v-if="chatStore.doclingConfigError" class="card-desc" role="alert">{{ chatStore.doclingConfigError }}</p>
         <el-form label-position="top">
           <el-form-item label="Docling 服务根地址">
-            <el-input data-test="docling-base-url" v-model="doclingLocal.baseUrl" type="url" autocomplete="off" placeholder="http://127.0.0.1:5001" />
+            <el-input data-test="docling-base-url" v-model="doclingLocal.baseUrl" type="url" autocomplete="off" :placeholder="DOCLING_CAMPUS_URL" />
           </el-form-item>
           <el-form-item label="API Key（可选）">
             <el-input v-model="doclingLocal.apiKey" type="password" show-password autocomplete="off" placeholder="服务启用认证时填写" />
@@ -107,6 +107,7 @@
           <div class="action-row">
             <el-button data-test="docling-save" type="primary" :loading="savingDocling" @click="saveDocling">保存设置</el-button>
             <el-button :loading="testingDocling" @click="testDocling">测试连接</el-button>
+            <el-button data-test="docling-campus" :disabled="savingDocling" @click="useCampusDocling">使用校园网服务</el-button>
           </div>
           <p data-test="docling-save-state" class="card-desc" role="status">{{ doclingDirty ? '有未保存的修改，请点击「保存设置」' : '设置已保存；修改后请点击「保存设置」' }}</p>
         </el-form>
@@ -269,6 +270,7 @@ import {
 import { storeToRefs } from 'pinia'
 import { usePaperStore } from '../stores/paper'
 import { previewBackup, type BackupPreview } from '../utils/backupPreview'
+import { DOCLING_CAMPUS_URL } from '../utils/doclingDocument'
 
 const paperMindMark = new URL('../../assets/brand/papermind-mark.svg', import.meta.url).href
 
@@ -288,6 +290,10 @@ const doclingDirty = computed(() => JSON.stringify(doclingLocal) !== JSON.string
 watch(doclingConfig, (config, previous) => {
   if (JSON.stringify(doclingLocal) === JSON.stringify(previous)) Object.assign(doclingLocal, config)
 })
+function useCampusDocling() {
+  doclingLocal.baseUrl = DOCLING_CAMPUS_URL
+  doclingLocal.apiKey = ''
+}
 const rebuildingTrees = ref(false)
 
 // 本地镜像必须跟着 store 走：视图挂载时 store 往往还没 init（init 在 App 的 onMounted 里），

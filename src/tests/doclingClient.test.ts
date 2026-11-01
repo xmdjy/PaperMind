@@ -4,24 +4,20 @@ import { DEFAULT_DOCLING_SETTINGS } from '../utils/doclingDocument'
 const settings = { ...DEFAULT_DOCLING_SETTINGS, baseUrl: 'http://localhost:5001/prefix', apiKey: 'test-key' }
 const response = (status = 'success') => new Response(JSON.stringify({ status, document: { json_content: { texts: [{ text: 'Evidence' }] } } }))
 describe('Docling HTTP boundary', () => {
-  it('opens the managed server connection before uploading and stops on connection failure', async () => {
-    const order: string[] = []
-    const connect = vi.fn(async () => { order.push('connect') })
-    const request = vi.fn(async () => { order.push('upload'); return response() })
-    await convertPdf(new Uint8Array([37, 80, 68, 70]), 'paper.pdf', DEFAULT_DOCLING_SETTINGS, request, connect)
-    expect(order).toEqual(['connect', 'upload'])
-    expect(connect).toHaveBeenCalledWith(DEFAULT_DOCLING_SETTINGS.baseUrl)
-
-    connect.mockRejectedValueOnce(new Error('SSH unavailable'))
-    await expect(convertPdf(new Uint8Array(), 'paper.pdf', DEFAULT_DOCLING_SETTINGS, request, connect)).rejects.toThrow('SSH unavailable')
-    expect(request).toHaveBeenCalledTimes(1)
-  })
-  it('also opens the tunnel for a previously saved localhost address', async () => {
-    const connect = vi.fn().mockResolvedValue(undefined)
+  it('uploads to the campus HTTPS endpoint without establishing an SSH connection', async () => {
     const request = vi.fn().mockResolvedValue(response())
-    await convertPdf(new Uint8Array(), 'paper.pdf', { ...DEFAULT_DOCLING_SETTINGS, baseUrl: 'http://localhost:5001' }, request, connect)
-    expect(connect).toHaveBeenCalledWith(DEFAULT_DOCLING_SETTINGS.baseUrl)
-    expect(request.mock.calls[0][0]).toBe(`${DEFAULT_DOCLING_SETTINGS.baseUrl}/v1/convert/file`)
+    const result = await convertPdf(new Uint8Array([37, 80, 68, 70]), 'paper.pdf', DEFAULT_DOCLING_SETTINGS, request)
+    expect(request.mock.calls[0][0]).toBe('https://101.76.222.224/v1/convert/file')
+    expect(result.items[0].text).toBe('Evidence')
+  })
+  it('keeps an explicitly saved localhost service local', async () => {
+    const request = vi.fn().mockResolvedValue(response())
+    await convertPdf(new Uint8Array(), 'paper.pdf', { ...DEFAULT_DOCLING_SETTINGS, baseUrl: 'http://localhost:5001' }, request)
+    expect(request.mock.calls[0][0]).toBe('http://127.0.0.1:5001/v1/convert/file')
+  })
+  it('explains when the shared server is busy or the PDF is too large', async () => {
+    await expect(convertPdf(new Uint8Array(), 'p.pdf', settings, vi.fn().mockResolvedValue(new Response('', { status: 429 })))).rejects.toThrow('繁忙')
+    await expect(convertPdf(new Uint8Array(), 'p.pdf', settings, vi.fn().mockResolvedValue(new Response('', { status: 413 })))).rejects.toThrow('大小')
   })
   it('uploads local PDF with embedded JSON and optional authentication', async () => {
     const request = vi.fn().mockResolvedValue(response())
@@ -44,6 +40,16 @@ describe('Docling HTTP boundary', () => {
   it('reports HTTP authentication and malformed responses', async () => {
     await expect(convertPdf(new Uint8Array(), 'p.pdf', settings, vi.fn().mockResolvedValue(new Response('', { status: 401 })))).rejects.toThrow('认证')
     await expect(convertPdf(new Uint8Array(), 'p.pdf', settings, vi.fn().mockResolvedValue(new Response('invalid')))).rejects.toThrow('JSON')
+  })
+  it('explains direct network and TLS failures without disabling certificate checks', async () => {
+    await expect(testDoclingConnection(settings, vi.fn().mockRejectedValue(Object.assign(new Error('connect failed'), { code: 'EHOSTUNREACH' })))).rejects.toThrow('校园网')
+    await expect(testDoclingConnection(settings, vi.fn().mockRejectedValue(Object.assign(new Error('expired'), { code: 'CERT_HAS_EXPIRED' })))).rejects.toThrow('证书')
+  })
+  it('closes an unsuccessful response body before reporting the error', async () => {
+    let canceled = false
+    const failed = new Response(new ReadableStream({ cancel() { canceled = true } }), { status: 429 })
+    await expect(testDoclingConnection(settings, vi.fn().mockResolvedValue(failed))).rejects.toThrow('繁忙')
+    expect(canceled).toBe(true)
   })
   it('only accepts an OpenAPI service with the actual conversion endpoint', async () => {
     const request = vi.fn().mockResolvedValue(new Response(JSON.stringify({ paths: { '/v1/convert/file': { post: {} } } })))

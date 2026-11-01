@@ -111,6 +111,19 @@ describe('backup recovery consent and unsaved settings', () => {
     await flushPromises()
     expect((wrapper!.get('input[data-test="docling-base-url"]').element as HTMLInputElement).value).toBe('http://example.test:5001')
   })
+  it('switches an existing service to campus HTTPS without reusing its API key or saving prematurely', async () => {
+    const { store } = await setup()
+    store.doclingConfig = { ...store.doclingConfig, baseUrl: 'https://custom.example.com', apiKey: 'custom-only-secret' }
+    await flushPromises()
+    await wrapper!.get('[data-test="docling-campus"]').trigger('click')
+    expect((wrapper!.get('input[data-test="docling-base-url"]').element as HTMLInputElement).value).toBe('https://101.76.222.224')
+    expect(wrapper!.get('[data-test="docling-save-state"]').text()).toContain('未保存')
+    expect(store.doclingConfig.baseUrl).toBe('https://custom.example.com')
+    await wrapper!.get('[data-test="docling-save"]').trigger('click')
+    await flushPromises()
+    expect(store.doclingConfig.baseUrl).toBe('https://101.76.222.224')
+    expect(store.doclingConfig.apiKey).toBe('')
+  })
   it('allows the required reload after a successful confirmed restore', async () => {
     await setup()
     await choose()
