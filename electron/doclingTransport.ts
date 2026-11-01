@@ -42,6 +42,7 @@ export function createDoclingRequest(trust: DoclingTrust = { origin: DOCLING_CAM
         const upload = Readable.fromWeb(encoded.body as import('node:stream/web').ReadableStream)
         upload.once('error', error => outgoing.destroy(error))
         outgoing.once('error', () => upload.destroy())
+        outgoing.once('close', () => upload.destroy())
         upload.pipe(outgoing)
       } else outgoing.end()
     })

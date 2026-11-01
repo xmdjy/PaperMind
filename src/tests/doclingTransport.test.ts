@@ -56,6 +56,28 @@ describe('Docling scoped HTTPS transport', () => {
     expect(uploaded).toContain('%PDF-real-upload')
     expect(apiKey).toBe('fixture-key')
   })
+  it('cancels the upload source when the server rejects it before reading the body', async () => {
+    const { origin } = await serve((_request, response) => {
+      response.writeHead(413, { Connection: 'close' })
+      response.end('too large')
+    })
+    let canceled = false
+    let source!: ReadableStreamDefaultController<Uint8Array>
+    const body = new ReadableStream<Uint8Array>({
+      start(controller) { source = controller; controller.enqueue(new Uint8Array(1024)) },
+      cancel() { canceled = true },
+    })
+    const input = new Request(origin, { method: 'POST', body, duplex: 'half' } as RequestInit)
+    try {
+      const response = await createDoclingRequest({ origin, ca: cert.toString() })(input)
+      expect(response.status).toBe(413)
+      await response.text()
+      await new Promise(resolve => setTimeout(resolve, 50))
+      expect(canceled).toBe(true)
+    } finally {
+      if (!canceled) source.close()
+    }
+  })
   it('rejects a certificate outside the dedicated trust chain', async () => {
     const { origin } = await serve((_request, response) => response.end('{}'), { key: otherKey, cert: otherCert })
     await expect(createDoclingRequest({ origin, ca: cert.toString() })(origin)).rejects.toThrow()
